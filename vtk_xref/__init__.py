@@ -16,6 +16,22 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from typing import ClassVar
 
+#: Timeout (in seconds) for HTTP requests to the VTK documentation server.
+HTTP_TIMEOUT = 30
+
+#: HTTP status codes that, by default, do not fail the build. These typically
+#: indicate a transient server-side issue (rate limiting or upstream
+#: unavailability) rather than a genuinely-invalid class reference.
+DEFAULT_IGNORED_STATUS_CODES = frozenset(
+    {
+        HTTPStatus.TOO_MANY_REQUESTS,    # 429
+        HTTPStatus.INTERNAL_SERVER_ERROR,  # 500
+        HTTPStatus.BAD_GATEWAY,          # 502
+        HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+        HTTPStatus.GATEWAY_TIMEOUT,      # 504
+    }
+)
+
 
 class VTKRole(ReferenceRole):
     """Link to vtk class documentation using a custom role.
@@ -73,15 +89,30 @@ class VTKRole(ReferenceRole):
             return [node], []
 
         # Not cached, build URL and validate
+        status_code: int | None = None
+        status_reason = ""
         try:
-            response = requests.get(cls_url, timeout=3)
-            if response.status_code != HTTPStatus.OK:
-                msg = f"Status code {response.status_code}"
+            response = requests.get(cls_url, timeout=HTTP_TIMEOUT)
+            status_code = response.status_code
+            status_reason = response.reason or ""
+            if status_code != HTTPStatus.OK:
+                msg = f"HTTP {status_code} {status_reason}".strip()
                 raise requests.RequestException(msg)
             html = response.text
-        except requests.RequestException:
+        except requests.RequestException as exc:
+            if status_code is not None and status_code in self._ignored_status_codes():
+                # Transient server issue — do not fail the build. Emit an info
+                # message and fall back to the (unvalidated) class URL.
+                self._info_ignored_class_ref(cls_name, status_code, status_reason)
+                self.resolved_urls[cache_key] = cls_url
+                if member_name:
+                    self.resolved_urls[(cls_name, None)] = cls_url
+                node = nodes.reference(title, title, refuri=cls_url)
+                return [node], []
+
             # Invalid class url
-            self._warn_invalid_class_ref(cls_name)
+            reason = str(exc) if str(exc) else exc.__class__.__name__
+            self._warn_invalid_class_ref(cls_name, reason=reason)
 
             # Create cache entries
             self.resolved_urls[cache_key] = INVALID_URL
@@ -112,9 +143,17 @@ class VTKRole(ReferenceRole):
         node = nodes.reference(title, title, refuri=cls_url)
         return [node], []
 
-    def _warn_invalid_class_ref(self, cls_name):
+    def _ignored_status_codes(self):
+        try:
+            codes = self.env.config.vtk_xref_ignored_status_codes
+        except AttributeError:
+            return DEFAULT_IGNORED_STATUS_CODES
+        return frozenset(codes)
+
+    def _warn_invalid_class_ref(self, cls_name, reason=None):
+        suffix = f" ({reason})" if reason else ""
         self._issue_warning(
-            f"Invalid VTK class reference: '{cls_name}' → {_vtk_class_url(cls_name)}"
+            f"Invalid VTK class reference: '{cls_name}' → {_vtk_class_url(cls_name)}{suffix}"
         )
 
     def _warn_invalid_class_member_ref(self, cls_name, member_name):
@@ -127,6 +166,14 @@ class VTKRole(ReferenceRole):
         self._issue_warning(
             f"Too many nested members in VTK reference: '{cls_name}.{member_name}.{extra}'. "
             f"Interpreting as '{cls_name}.{member_name}', ignoring: '{extra}'"
+        )
+
+    def _info_ignored_class_ref(self, cls_name, status_code, reason):
+        logger.info(
+            f"Ignoring HTTP {status_code} {reason} for VTK class reference: "
+            f"'{cls_name}' → {_vtk_class_url(cls_name)}",
+            location=(self.inliner.document.current_source, self.lineno),
+            type="vtk-xref",
         )
 
     def _issue_warning(self, msg):
@@ -154,6 +201,12 @@ def _find_member_anchor(html: str, member_name: str) -> str | None:
 
 def setup(app):
     app.add_role("vtk", VTKRole())
+    app.add_config_value(
+        "vtk_xref_ignored_status_codes",
+        DEFAULT_IGNORED_STATUS_CODES,
+        "env",
+        types=(frozenset, set, list, tuple),
+    )
     return {
         "parallel_read_safe": True,
         "parallel_write_safe": True,
