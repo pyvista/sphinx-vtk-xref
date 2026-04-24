@@ -31,7 +31,7 @@ ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[.*?m")
 @pytest.fixture(scope="module")
 def vtk_polydata_html():
     """Fixture that fetches HTML for vtkPolyData once per test module."""
-    response = requests.get(_vtk_class_url("vtkPolyData"), timeout=3)
+    response = requests.get(_vtk_class_url("vtkPolyData"), timeout=30)
     response.raise_for_status()
     return response.text
 
@@ -48,17 +48,18 @@ def test_find_member_anchor(vtk_polydata_html):
 
     # Confirm that the final URL with anchor resolves
     full_url = f"{_vtk_class_url('vtkPolyData')}#{anchor}"
-    response = requests.get(full_url, timeout=3, allow_redirects=True)
+    response = requests.get(full_url, timeout=30, allow_redirects=True)
     assert response.status_code == HTTPStatus.OK
 
 
-def make_temp_doc_project(tmp_path, sample_text: str):
+def make_temp_doc_project(tmp_path, sample_text: str, conf_extras: str = ""):
     """Set up a minimal Sphinx project that uses the :vtk: role directly in index.rst."""
     src = tmp_path / "src"
     src.mkdir()
 
     # conf.py with the extension enabled
-    (src / "conf.py").write_text("""extensions = ['vtk_xref']""")
+    conf = "extensions = ['vtk_xref']\n" + conf_extras
+    (src / "conf.py").write_text(conf)
 
     # Write index.rst with sample text
     lines = [
@@ -114,7 +115,7 @@ def make_temp_doc_project(tmp_path, sample_text: str):
         (  # Invalid class
             ":vtk:`NonExistentClass`",
             {_vtk_class_url("NonExistentClass"): "NonExistentClass"},
-            "Invalid VTK class reference: 'NonExistentClass' → https://vtk.org/doc/nightly/html/classNonExistentClass.html [vtk-xref]",
+            "Invalid VTK class reference: 'NonExistentClass' → https://vtk.org/doc/nightly/html/classNonExistentClass.html (HTTP 404 Not Found) [vtk-xref]",
         ),
         (  # Test caching with valid class and invalid member
             textwrap.dedent("""
@@ -139,7 +140,7 @@ def make_temp_doc_project(tmp_path, sample_text: str):
             {
                 _vtk_class_url("vtkFooBar"): "vtkFooBar",
             },
-            "Invalid VTK class reference: 'vtkFooBar' → https://vtk.org/doc/nightly/html/classvtkFooBar.html [vtk-xref]",
+            "Invalid VTK class reference: 'vtkFooBar' → https://vtk.org/doc/nightly/html/classvtkFooBar.html (HTTP 404 Not Found) [vtk-xref]",
         ),
     ],
 )
@@ -192,6 +193,49 @@ def test_vtk_role(tmp_path, code_block, expected_links, expected_warning):
         assert link.text == expected_text, (
             f'Expected link text "{expected_text}", got "{link.text}"'
         )
+
+
+def test_ignored_status_codes(tmp_path):
+    """A status code in ``vtk_xref_ignored_status_codes`` must not fail ``-W`` builds.
+
+    Asking vtk.org for a non-existent class returns a 404. Adding 404 to the
+    ignored set should turn that into a non-fatal info log so ``-W`` still passes.
+    """
+    code_block = ":vtk:`NonExistentClass`"
+    conf_extras = "vtk_xref_ignored_status_codes = {404}\n"
+    doc_project = make_temp_doc_project(tmp_path, code_block, conf_extras=conf_extras)
+    build_html_dir = tmp_path / "_build" / "html"
+
+    result = subprocess.run(  # noqa: UP022
+        [
+            sys.executable,
+            "-msphinx",
+            "-b",
+            "html",
+            str(doc_project),
+            str(build_html_dir),
+            "-W",
+            "--keep-going",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    stdout = result.stdout.decode("utf-8", errors="replace")
+    stderr = result.stderr.decode("utf-8", errors="replace")
+    print("STDOUT:\n", stdout)
+    print("STDERR:\n", stderr)
+
+    assert result.returncode == 0, "Build should not fail when 404 is ignored"
+
+    if not sys.platform.startswith("win"):
+        # The old "Invalid VTK class reference" warning must not appear.
+        assert "Invalid VTK class reference" not in stderr
+
+    # The class URL (unvalidated) should still land in the HTML as a fallback link.
+    html = (build_html_dir / "index.html").read_text(encoding="utf-8")
+    soup = BeautifulSoup(html, "html.parser")
+    link = soup.find("a", href=_vtk_class_url("NonExistentClass"))
+    assert link is not None
 
 
 def _build_docs(src, build_dir, jobs):
