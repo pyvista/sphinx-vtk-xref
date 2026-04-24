@@ -30,6 +30,13 @@ Homepage = 'https://github.com/pyvista/vtk-xref'
 addopts = "--cov=vtk_xref --cov-fail-under=85"
 testpaths = 'tests'
 
+[tool.coverage.run]
+# The test suite spawns sphinx-build as a subprocess via ``sys.executable``;
+# parallel mode + COVERAGE_PROCESS_START (set in tests/conftest.py) let the
+# ``:vtk:`` role code be measured from inside those subprocesses.
+source = ['vtk_xref']
+parallel = true
+
 [tool.ruff]
 line-length = 100
 
