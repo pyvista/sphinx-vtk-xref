@@ -21,7 +21,7 @@ license = {text = 'MIT'}
 name = 'vtk-xref'
 readme = 'README.rst'
 requires-python = '>=3.8'
-version = '0.1.1'
+version = '0.1.2'
 
 [project.urls]
 Homepage = 'https://github.com/pyvista/vtk-xref'
