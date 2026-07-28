@@ -145,7 +145,7 @@ class VTKRole(ReferenceRole):
 
     def _ignored_status_codes(self):
         try:
-            codes = self.env.config.vtk_xref_ignored_status_codes
+            codes = self.env.config.sphinx_vtk_xref_ignored_status_codes
         except AttributeError:
             return DEFAULT_IGNORED_STATUS_CODES
         return frozenset(codes)
@@ -173,12 +173,14 @@ class VTKRole(ReferenceRole):
             f"Ignoring HTTP {status_code} {reason} for VTK class reference: "
             f"'{cls_name}' → {_vtk_class_url(cls_name)}",
             location=(self.inliner.document.current_source, self.lineno),
-            type="vtk-xref",
+            type="sphinx-vtk-xref",
         )
 
     def _issue_warning(self, msg):
         logger.warning(
-            msg, location=(self.inliner.document.current_source, self.lineno), type="vtk-xref"
+            msg,
+            location=(self.inliner.document.current_source, self.lineno),
+            type="sphinx-vtk-xref",
         )
 
 
@@ -202,7 +204,7 @@ def _find_member_anchor(html: str, member_name: str) -> str | None:
 def setup(app):
     app.add_role("vtk", VTKRole())
     app.add_config_value(
-        "vtk_xref_ignored_status_codes",
+        "sphinx_vtk_xref_ignored_status_codes",
         DEFAULT_IGNORED_STATUS_CODES,
         "env",
         types=(frozenset, set, list, tuple),

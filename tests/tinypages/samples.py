@@ -2,7 +2,7 @@ def example() -> int:
     """
     Example function.
 
-    Demonstrate the usage of ``vtk-xref``:
+    Demonstrate the usage of ``sphinx-vtk-xref``:
 
     - :vtk:`vtkImageData.GetSpacing` should render to ``vtkImageData.GetSpacing``.
     - :vtk:`~vtkPolyData.SetVerts` should render to ``SetVerts``.

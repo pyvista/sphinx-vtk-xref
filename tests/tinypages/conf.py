@@ -20,7 +20,7 @@ release = "0.1"
 exclude_patterns = ["_build"]
 pygments_style = "sphinx"
 
-extensions = ["vtk_xref", "sphinx.ext.autosummary"]
+extensions = ["sphinx_vtk_xref", "sphinx.ext.autosummary"]
 
 # -- Options for HTML output ----------------------------------------------
 

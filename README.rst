@@ -1,28 +1,28 @@
-VTK XRef
-========
+Sphinx VTK XRef
+===============
 
-``vtk-xref`` is a Sphinx extension for linking directly to
+``sphinx-vtk-xref`` is a Sphinx extension for linking directly to
 `VTK's documentation <https://vtk.org/doc/nightly/html/index.html>`_
 using the ``:vtk:`` reference role.
 
 Installation
 ------------
 
-#.  Add ``vtk-xref`` as a project dependency or install it with:
+#.  Add ``sphinx-vtk-xref`` as a project dependency or install it with:
 
     .. code-block:: bash
 
-        pip install vtk-xref
+        pip install sphinx-vtk-xref
 
 
-#.  Add ``vtk_xref`` as an extension in your ``conf.py`` file
+#.  Add ``sphinx_vtk_xref`` as an extension in your ``conf.py`` file
     used by Sphinx:
 
 .. code-block:: python
 
     extensions = [
         ...,
-        'vtk_xref',
+        'sphinx_vtk_xref',
     ]
 
 Usage

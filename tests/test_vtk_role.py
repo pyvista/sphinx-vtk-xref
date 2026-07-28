@@ -14,8 +14,8 @@ from bs4 import BeautifulSoup
 import pytest
 import requests
 
-from vtk_xref import _find_member_anchor
-from vtk_xref import _vtk_class_url
+from sphinx_vtk_xref import _find_member_anchor
+from sphinx_vtk_xref import _vtk_class_url
 
 GET_SPACING_ANCHOR = "ae6ebee83577b2d58c393a0df2f15b67d"
 GET_SPACING_URL = f"{_vtk_class_url('vtkImageData')}#{GET_SPACING_ANCHOR}"
@@ -58,7 +58,7 @@ def make_temp_doc_project(tmp_path, sample_text: str, conf_extras: str = ""):
     src.mkdir()
 
     # conf.py with the extension enabled
-    conf = "extensions = ['vtk_xref']\n" + conf_extras
+    conf = "extensions = ['sphinx_vtk_xref']\n" + conf_extras
     (src / "conf.py").write_text(conf)
 
     # Write index.rst with sample text
@@ -105,17 +105,17 @@ def make_temp_doc_project(tmp_path, sample_text: str, conf_extras: str = ""):
             {
                 GET_SPACING_URL: "vtkImageData.GetSpacing.SomethingElse",
             },
-            "Too many nested members in VTK reference: 'vtkImageData.GetSpacing.SomethingElse'. Interpreting as 'vtkImageData.GetSpacing', ignoring: 'SomethingElse' [vtk-xref]",
+            "Too many nested members in VTK reference: 'vtkImageData.GetSpacing.SomethingElse'. Interpreting as 'vtkImageData.GetSpacing', ignoring: 'SomethingElse' [sphinx-vtk-xref]",
         ),
         (  # Valid class, invalid method
             ":vtk:`vtkImageData.FakeMethod`",
             {_vtk_class_url("vtkImageData"): "vtkImageData.FakeMethod"},
-            "VTK method anchor not found for: 'vtkImageData.FakeMethod' → https://vtk.org/doc/nightly/html/classvtkImageData.html#<anchor>, the class URL is used instead. [vtk-xref]",
+            "VTK method anchor not found for: 'vtkImageData.FakeMethod' → https://vtk.org/doc/nightly/html/classvtkImageData.html#<anchor>, the class URL is used instead. [sphinx-vtk-xref]",
         ),
         (  # Invalid class
             ":vtk:`NonExistentClass`",
             {_vtk_class_url("NonExistentClass"): "NonExistentClass"},
-            "Invalid VTK class reference: 'NonExistentClass' → https://vtk.org/doc/nightly/html/classNonExistentClass.html (HTTP 404 Not Found) [vtk-xref]",
+            "Invalid VTK class reference: 'NonExistentClass' → https://vtk.org/doc/nightly/html/classNonExistentClass.html (HTTP 404 Not Found) [sphinx-vtk-xref]",
         ),
         (  # Test caching with valid class and invalid member
             textwrap.dedent("""
@@ -128,7 +128,7 @@ def make_temp_doc_project(tmp_path, sample_text: str, conf_extras: str = ""):
                 # Only one URL expected: the url for a bad member falls back to the class URL
                 _vtk_class_url("vtkImageData"): "vtkImageData",
             },
-            "VTK method anchor not found for: 'vtkImageData.FakeEnum' → https://vtk.org/doc/nightly/html/classvtkImageData.html#<anchor>, the class URL is used instead. [vtk-xref]",
+            "VTK method anchor not found for: 'vtkImageData.FakeEnum' → https://vtk.org/doc/nightly/html/classvtkImageData.html#<anchor>, the class URL is used instead. [sphinx-vtk-xref]",
         ),
         (  # Test caching with invalid class and invalid member
             textwrap.dedent("""
@@ -140,7 +140,7 @@ def make_temp_doc_project(tmp_path, sample_text: str, conf_extras: str = ""):
             {
                 _vtk_class_url("vtkFooBar"): "vtkFooBar",
             },
-            "Invalid VTK class reference: 'vtkFooBar' → https://vtk.org/doc/nightly/html/classvtkFooBar.html (HTTP 404 Not Found) [vtk-xref]",
+            "Invalid VTK class reference: 'vtkFooBar' → https://vtk.org/doc/nightly/html/classvtkFooBar.html (HTTP 404 Not Found) [sphinx-vtk-xref]",
         ),
     ],
 )
@@ -196,13 +196,13 @@ def test_vtk_role(tmp_path, code_block, expected_links, expected_warning):
 
 
 def test_ignored_status_codes(tmp_path):
-    """A status code in ``vtk_xref_ignored_status_codes`` must not fail ``-W`` builds.
+    """A status code in ``sphinx_vtk_xref_ignored_status_codes`` must not fail ``-W`` builds.
 
     Asking vtk.org for a non-existent class returns a 404. Adding 404 to the
     ignored set should turn that into a non-fatal info log so ``-W`` still passes.
     """
     code_block = ":vtk:`NonExistentClass`"
-    conf_extras = "vtk_xref_ignored_status_codes = {404}\n"
+    conf_extras = "sphinx_vtk_xref_ignored_status_codes = {404}\n"
     doc_project = make_temp_doc_project(tmp_path, code_block, conf_extras=conf_extras)
     build_html_dir = tmp_path / "_build" / "html"
 
