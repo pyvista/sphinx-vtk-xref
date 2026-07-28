@@ -1,12 +1,11 @@
 """Sphinx role for linking to VTK documentation."""
 
 from __future__ import annotations
-from subprocess import run, PIPE
+from subprocess import run
 from pathlib import Path
 from http import HTTPStatus
 from unittest.mock import patch
 import re
-import subprocess
 import sys
 import textwrap
 import filecmp
@@ -63,6 +62,30 @@ def _rst_to_myst_role(code_block: str) -> str:
     the role's delimiters.
     """
     return re.sub(r":vtk:`([^`]*)`", r"{vtk}`\1`", code_block)
+
+
+def _build_docs(src, build_dir, jobs=None):
+    """Run ``sphinx-build`` on ``src`` in a subprocess and return the completed process.
+
+    Always builds with ``-W --keep-going`` so warnings from the ``:vtk:`` role
+    surface as build failures. Pass ``jobs`` to build in parallel with an
+    explicit doctree directory (used to compare parallel vs. serial output).
+
+    ``stdout``/``stderr`` on the returned process are already decoded text
+    (with invalid bytes replaced), so callers don't need to decode manually.
+    """
+    cmd = [
+        sys.executable,
+        "-msphinx",
+        "-b",
+        "html",
+        str(src),
+        str(build_dir / "html"),
+    ]
+    if jobs is not None:
+        cmd += ["-d", str(build_dir / "doctrees"), f"-j{jobs}"]
+    cmd += ["-W", "--keep-going"]
+    return run(cmd, capture_output=True, encoding="utf-8", errors="replace", check=False)
 
 
 def make_temp_doc_project(tmp_path, sample_text: str, conf_extras: str = "", filetype: str = "rst"):
@@ -176,24 +199,9 @@ def test_vtk_role(tmp_path, code_block, expected_links, expected_warning, filety
     build_dir = tmp_path / "_build"
     build_html_dir = build_dir / "html"
 
-    result = subprocess.run(  # noqa: UP022
-        [
-            sys.executable,
-            "-msphinx",
-            "-b",
-            "html",
-            str(doc_project),
-            str(build_html_dir),
-            "-W",
-            "--keep-going",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-
-    # need to explicitly decode the output with UTF-8 to avoid UnicodeDecodeError
-    stdout = result.stdout.decode("utf-8", errors="replace")
-    stderr = result.stderr.decode("utf-8", errors="replace")
+    result = _build_docs(doc_project, build_dir)
+    stdout = result.stdout
+    stderr = result.stderr
     print("STDOUT:\n", stdout)
     print("STDERR:\n", stderr)
 
@@ -233,23 +241,10 @@ def test_warning_location_has_single_suffix(tmp_path, filetype, source_name):
     """
     code_block = ":vtk:`NonExistentClass`"
     doc_project = make_temp_doc_project(tmp_path, code_block, filetype=filetype)
-    build_html_dir = tmp_path / "_build" / "html"
+    build_dir = tmp_path / "_build"
 
-    result = subprocess.run(  # noqa: UP022
-        [
-            sys.executable,
-            "-msphinx",
-            "-b",
-            "html",
-            str(doc_project),
-            str(build_html_dir),
-            "-W",
-            "--keep-going",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    stderr = result.stderr.decode("utf-8", errors="replace")
+    result = _build_docs(doc_project, build_dir)
+    stderr = result.stderr
     print("STDERR:\n", stderr)
 
     if not sys.platform.startswith("win"):
@@ -271,24 +266,12 @@ def test_ignored_status_codes(tmp_path):
     code_block = ":vtk:`NonExistentClass`"
     conf_extras = "sphinx_vtk_xref_ignored_status_codes = {404}\n"
     doc_project = make_temp_doc_project(tmp_path, code_block, conf_extras=conf_extras)
-    build_html_dir = tmp_path / "_build" / "html"
+    build_dir = tmp_path / "_build"
+    build_html_dir = build_dir / "html"
 
-    result = subprocess.run(  # noqa: UP022
-        [
-            sys.executable,
-            "-msphinx",
-            "-b",
-            "html",
-            str(doc_project),
-            str(build_html_dir),
-            "-W",
-            "--keep-going",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    stdout = result.stdout.decode("utf-8", errors="replace")
-    stderr = result.stderr.decode("utf-8", errors="replace")
+    result = _build_docs(doc_project, build_dir)
+    stdout = result.stdout
+    stderr = result.stderr
     print("STDOUT:\n", stdout)
     print("STDERR:\n", stderr)
 
@@ -318,24 +301,12 @@ def test_nitpicky_disabled(tmp_path):
     """)
     conf_extras = "sphinx_vtk_xref_nitpicky = False\n"
     doc_project = make_temp_doc_project(tmp_path, code_block, conf_extras=conf_extras)
-    build_html_dir = tmp_path / "_build" / "html"
+    build_dir = tmp_path / "_build"
+    build_html_dir = build_dir / "html"
 
-    result = subprocess.run(  # noqa: UP022
-        [
-            sys.executable,
-            "-msphinx",
-            "-b",
-            "html",
-            str(doc_project),
-            str(build_html_dir),
-            "-W",
-            "--keep-going",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    stdout = result.stdout.decode("utf-8", errors="replace")
-    stderr = result.stderr.decode("utf-8", errors="replace")
+    result = _build_docs(doc_project, build_dir)
+    stdout = result.stdout
+    stderr = result.stderr
     print("STDOUT:\n", stdout)
     print("STDERR:\n", stderr)
 
@@ -412,23 +383,6 @@ def test_nitpicky_enabled_makes_http_requests(tmp_path):
         _build_in_process(doc_project, build_dir, warningiserror=True)
 
     mock_get.assert_called_once()
-
-
-def _build_docs(src, build_dir, jobs):
-    cmd = [
-        sys.executable,
-        "-msphinx",
-        "-b",
-        "html",
-        str(src),
-        str(build_dir / "html"),
-        "-d",
-        str(build_dir / "doctrees"),
-        f"-j{jobs}",
-        "-W",
-        "--keep-going",
-    ]
-    return run(cmd, stdout=PIPE, stderr=PIPE, text=True)
 
 
 def _check_html_content(html_path, expected_links):
