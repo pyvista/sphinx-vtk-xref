@@ -97,6 +97,8 @@ jobs:
         find . -name '*.tar.gz' -exec mv {} dist/ \;
     - name: Publish package distributions to PyPI
       uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc
+      with:
+        verbose: true
     - name: Create GitHub Release
       uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8
       with:
