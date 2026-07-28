@@ -1,6 +1,6 @@
 .DS_Store
 .idea/
-vtk_xref.egg-info/
+sphinx_vtk_xref.egg-info/
 __pycache__/
 #*.
 tests/tinypages/_build

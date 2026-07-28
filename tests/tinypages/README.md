@@ -1,4 +1,4 @@
-# Test project for vtk-xref sphinx extension
+# Test project for sphinx-vtk-xref sphinx extension
 
 Build locally with:
 

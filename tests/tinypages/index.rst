@@ -1,5 +1,5 @@
-vtk-xref tinypages
-==================
+sphinx-vtk-xref tinypages
+=========================
 
 Demonstrate that references are automatically build from VTK references.
 
