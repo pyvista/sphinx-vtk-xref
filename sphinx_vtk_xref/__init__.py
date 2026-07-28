@@ -66,6 +66,12 @@ class VTKRole(ReferenceRole):
             cls_name, member_name = parts[0], parts[1] if len(parts) == 2 else None
         cls_url = _vtk_class_url(cls_name)
 
+        if not self._nitpicky():
+            # Link checking disabled: skip the HTTP validation/anchor lookup
+            # entirely and point straight at the (unvalidated) class URL.
+            node = nodes.reference(title, title, refuri=cls_url)
+            return [node], []
+
         cache_key = (cls_name, member_name)
         cached_url = self.resolved_urls.get(cache_key)
         if cached_url is not None:
@@ -150,6 +156,12 @@ class VTKRole(ReferenceRole):
             return DEFAULT_IGNORED_STATUS_CODES
         return frozenset(codes)
 
+    def _nitpicky(self):
+        try:
+            return bool(self.env.config.sphinx_vtk_xref_nitpicky)
+        except AttributeError:
+            return True
+
     def _warn_invalid_class_ref(self, cls_name, reason=None):
         suffix = f" ({reason})" if reason else ""
         self._issue_warning(
@@ -208,6 +220,12 @@ def setup(app):
         DEFAULT_IGNORED_STATUS_CODES,
         "env",
         types=(frozenset, set, list, tuple),
+    )
+    app.add_config_value(
+        "sphinx_vtk_xref_nitpicky",
+        True,
+        "env",
+        types=(bool,),
     )
     return {
         "parallel_read_safe": True,
