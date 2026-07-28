@@ -4,6 +4,7 @@ from __future__ import annotations
 from subprocess import run, PIPE
 from pathlib import Path
 from http import HTTPStatus
+from unittest.mock import patch
 import re
 import subprocess
 import sys
@@ -11,9 +12,11 @@ import textwrap
 import filecmp
 
 from bs4 import BeautifulSoup
+from sphinx.application import Sphinx
 import pytest
 import requests
 
+from sphinx_vtk_xref import VTKRole
 from sphinx_vtk_xref import _find_member_anchor
 from sphinx_vtk_xref import _vtk_class_url
 
@@ -236,6 +239,115 @@ def test_ignored_status_codes(tmp_path):
     soup = BeautifulSoup(html, "html.parser")
     link = soup.find("a", href=_vtk_class_url("NonExistentClass"))
     assert link is not None
+
+
+def test_nitpicky_disabled(tmp_path):
+    """``sphinx_vtk_xref_nitpicky = False`` must skip link checking entirely.
+
+    An otherwise-invalid class reference and an unresolved member reference
+    should build cleanly, with no warning and no anchor resolution, since no
+    HTTP request is made.
+    """
+    code_block = textwrap.dedent("""
+    :vtk:`NonExistentClass`
+    :vtk:`vtkImageData.GetSpacing`
+    """)
+    conf_extras = "sphinx_vtk_xref_nitpicky = False\n"
+    doc_project = make_temp_doc_project(tmp_path, code_block, conf_extras=conf_extras)
+    build_html_dir = tmp_path / "_build" / "html"
+
+    result = subprocess.run(  # noqa: UP022
+        [
+            sys.executable,
+            "-msphinx",
+            "-b",
+            "html",
+            str(doc_project),
+            str(build_html_dir),
+            "-W",
+            "--keep-going",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    stdout = result.stdout.decode("utf-8", errors="replace")
+    stderr = result.stderr.decode("utf-8", errors="replace")
+    print("STDOUT:\n", stdout)
+    print("STDERR:\n", stderr)
+
+    assert result.returncode == 0, "Build should not fail when nitpicky is disabled"
+
+    if not sys.platform.startswith("win"):
+        assert "[sphinx-vtk-xref]" not in stderr
+
+    html = (build_html_dir / "index.html").read_text(encoding="utf-8")
+    soup = BeautifulSoup(html, "html.parser")
+
+    # Unvalidated class link, no HTTP check performed.
+    link = soup.find("a", href=_vtk_class_url("NonExistentClass"))
+    assert link is not None
+
+    # Member reference falls back to the plain class URL since resolving the
+    # anchor would require the HTTP request that is now skipped.
+    link = soup.find("a", href=_vtk_class_url("vtkImageData"))
+    assert link is not None
+    assert soup.find("a", href=GET_SPACING_URL) is None
+
+
+def _build_in_process(doc_project, build_dir, **sphinx_kwargs):
+    """Build ``doc_project`` in-process (no subprocess) so mocks in this test apply."""
+    app = Sphinx(
+        srcdir=str(doc_project),
+        confdir=str(doc_project),
+        outdir=str(build_dir / "html"),
+        doctreedir=str(build_dir / "doctrees"),
+        buildername="html",
+        **sphinx_kwargs,
+    )
+    app.build()
+
+
+def test_nitpicky_disabled_makes_no_http_requests(tmp_path):
+    """No ``requests.get`` calls should happen when link checking is disabled.
+
+    Uses an in-process Sphinx build (rather than the subprocess-based builds
+    used elsewhere in this file) so that mocking ``requests.get`` here
+    actually takes effect for the role's code.
+    """
+    # The class-level cache persists across in-process builds; start clean so
+    # a previous test can't hide a real network call behind a cache hit.
+    VTKRole.resolved_urls.clear()
+
+    code_block = textwrap.dedent("""
+    :vtk:`NonExistentClass`
+    :vtk:`vtkImageData.GetSpacing`
+    """)
+    conf_extras = "sphinx_vtk_xref_nitpicky = False\n"
+    doc_project = make_temp_doc_project(tmp_path, code_block, conf_extras=conf_extras)
+    build_dir = tmp_path / "_build"
+
+    with patch("sphinx_vtk_xref.requests.get") as mock_get:
+        _build_in_process(doc_project, build_dir, warningiserror=True)
+
+    mock_get.assert_not_called()
+
+
+def test_nitpicky_enabled_makes_http_requests(tmp_path):
+    """Sanity check: with link checking enabled (the default), requests are made.
+
+    Guards against the previous test passing for the wrong reason (e.g. the
+    mock never being wired up, or the role never running at all).
+    """
+    VTKRole.resolved_urls.clear()
+
+    code_block = ":vtk:`vtkImageData.GetSpacing`"
+    doc_project = make_temp_doc_project(tmp_path, code_block)
+    build_dir = tmp_path / "_build"
+
+    with patch("sphinx_vtk_xref.requests.get", wraps=requests.get) as mock_get:
+        _build_in_process(doc_project, build_dir, warningiserror=True)
+
+    mock_get.assert_called_once()
 
 
 def _build_docs(src, build_dir, jobs):
