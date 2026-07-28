@@ -1,6 +1,6 @@
 [build-system]
 build-backend = 'setuptools.build_meta'
-requires = ['setuptools>=61']
+requires = ['setuptools>=64', 'setuptools_scm>=8']
 
 [dependency-groups]
 dev = ['pytest', 'pytest-cov', 'pre-commit']
@@ -21,10 +21,12 @@ license = {text = 'MIT'}
 name = 'vtk-xref'
 readme = 'README.rst'
 requires-python = '>=3.8'
-version = '0.2.dev0'
+dynamic = ['version']
 
 [project.urls]
 Homepage = 'https://github.com/pyvista/vtk-xref'
+
+[tool.setuptools_scm]
 
 [tool.pytest.ini_options]
 addopts = "--cov=vtk_xref --cov-fail-under=85"
