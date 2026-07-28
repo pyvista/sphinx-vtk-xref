@@ -1,10 +1,13 @@
 name: CI
 
-on:
+# zizmor ignore note: the release job only consumes artifacts built by the
+# `test` job in this same run, never a cache populated by an earlier/forked
+# run, so opting setup-python into pip caching here is not exploitable.
+on: # zizmor: ignore[cache-poisoning]
   pull_request:
   push:
     tags:
-      - "*"
+    - '*'
     branches:
     - main
   workflow_dispatch:
@@ -14,6 +17,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+        cache: pip
+    - name: Run pre-commit
+      run: |
+        pip install --upgrade pip pre-commit
+        pre-commit run --all-files --show-diff-on-failure
+
   test:
     permissions:
       contents: read
@@ -51,7 +72,7 @@ jobs:
   release:
     name: Release
     if: github.event_name == 'push' && contains(github.ref, 'refs/tags')
-    needs: [test]
+    needs: [lint, test]
     runs-on: ubuntu-24.04
     environment:
       name: pypi

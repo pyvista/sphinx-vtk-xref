@@ -17,30 +17,30 @@ dependencies = [
   'requests'
 ]
 description = 'Sphinx extension for linking to VTK class documentation.'
+dynamic = ['version']
 license = {text = 'MIT'}
 name = 'vtk-xref'
 readme = 'README.rst'
 requires-python = '>=3.8'
-dynamic = ['version']
 
 [project.urls]
 Homepage = 'https://github.com/pyvista/vtk-xref'
 
-[tool.setuptools_scm]
-
-[tool.pytest.ini_options]
-addopts = "--cov=vtk_xref --cov-fail-under=85"
-testpaths = 'tests'
-
 [tool.coverage.run]
+parallel = true
 # The test suite spawns sphinx-build as a subprocess via ``sys.executable``;
 # parallel mode + COVERAGE_PROCESS_START (set in tests/conftest.py) let the
 # ``:vtk:`` role code be measured from inside those subprocesses.
 source = ['vtk_xref']
-parallel = true
+
+[tool.pytest.ini_options]
+addopts = "--cov=vtk_xref --cov-fail-under=85"
+testpaths = 'tests'
 
 [tool.ruff]
 line-length = 100
 
 [tool.setuptools]
 packages = ['vtk_xref']
+
+[tool.setuptools_scm]

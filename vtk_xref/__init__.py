@@ -24,11 +24,11 @@ HTTP_TIMEOUT = 30
 #: unavailability) rather than a genuinely-invalid class reference.
 DEFAULT_IGNORED_STATUS_CODES = frozenset(
     {
-        HTTPStatus.TOO_MANY_REQUESTS,    # 429
+        HTTPStatus.TOO_MANY_REQUESTS,  # 429
         HTTPStatus.INTERNAL_SERVER_ERROR,  # 500
-        HTTPStatus.BAD_GATEWAY,          # 502
+        HTTPStatus.BAD_GATEWAY,  # 502
         HTTPStatus.SERVICE_UNAVAILABLE,  # 503
-        HTTPStatus.GATEWAY_TIMEOUT,      # 504
+        HTTPStatus.GATEWAY_TIMEOUT,  # 504
     }
 )
 
