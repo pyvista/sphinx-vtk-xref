@@ -4,6 +4,8 @@ from __future__ import annotations
 from subprocess import run
 from pathlib import Path
 from http import HTTPStatus
+from types import SimpleNamespace
+from unittest.mock import Mock
 from unittest.mock import patch
 import re
 import sys
@@ -15,6 +17,7 @@ from sphinx.application import Sphinx
 import pytest
 import requests
 
+from sphinx_vtk_xref import DEFAULT_IGNORED_STATUS_CODES
 from sphinx_vtk_xref import VTKRole
 from sphinx_vtk_xref import _find_member_anchor
 from sphinx_vtk_xref import _vtk_class_url
@@ -383,6 +386,54 @@ def test_nitpicky_enabled_makes_http_requests(tmp_path):
         _build_in_process(doc_project, build_dir, warningiserror=True)
 
     mock_get.assert_called_once()
+
+
+def test_ignored_status_code_with_member(tmp_path):
+    """An ignored status code for a ``class.member`` reference must cache both keys.
+
+    Regression coverage for the branch that also marks the bare class name as
+    resolved (to the class URL) when the ignored-status fallback fires for a
+    class+member lookup, so a later plain-class reference reuses the cache
+    instead of issuing a second request.
+    """
+    VTKRole.resolved_urls.clear()
+
+    code_block = ":vtk:`vtkImageData.GetSpacing`"
+    conf_extras = "sphinx_vtk_xref_ignored_status_codes = {503}\n"
+    doc_project = make_temp_doc_project(tmp_path, code_block, conf_extras=conf_extras)
+    build_dir = tmp_path / "_build"
+
+    mock_response = Mock(status_code=503, reason="Service Unavailable", text="")
+    with patch("sphinx_vtk_xref.requests.get", return_value=mock_response):
+        _build_in_process(doc_project, build_dir, warningiserror=True)
+
+    class_url = _vtk_class_url("vtkImageData")
+    assert VTKRole.resolved_urls[("vtkImageData", "GetSpacing")] == class_url
+    assert VTKRole.resolved_urls[("vtkImageData", None)] == class_url
+
+
+def test_ignored_status_codes_defaults_without_config_value():
+    """Falls back to the built-in ignored-codes set if the config value is missing.
+
+    The config value is always registered by ``setup()`` in real builds; this
+    guards the defensive fallback for callers that access the role directly.
+    """
+    role = VTKRole.__new__(VTKRole)
+    fake_env = SimpleNamespace(config=SimpleNamespace())
+    with patch.object(VTKRole, "env", fake_env):
+        assert role._ignored_status_codes() == DEFAULT_IGNORED_STATUS_CODES
+
+
+def test_nitpicky_defaults_true_without_config_value():
+    """Falls back to ``nitpicky=True`` if the config value is missing.
+
+    The config value is always registered by ``setup()`` in real builds; this
+    guards the defensive fallback for callers that access the role directly.
+    """
+    role = VTKRole.__new__(VTKRole)
+    fake_env = SimpleNamespace(config=SimpleNamespace())
+    with patch.object(VTKRole, "env", fake_env):
+        assert role._nitpicky() is True
 
 
 def _check_html_content(html_path, expected_links):
