@@ -34,6 +34,9 @@ jobs:
       run: |
         pip install --upgrade pip pre-commit
         pre-commit run --all-files --show-diff-on-failure
+      env:
+        # no-commit-to-branch only makes sense as a local git hook, so skip in CI
+        SKIP: no-commit-to-branch
 
   test:
     permissions:
