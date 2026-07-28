@@ -55,24 +55,47 @@ def test_find_member_anchor(vtk_polydata_html):
     assert response.status_code == HTTPStatus.OK
 
 
-def make_temp_doc_project(tmp_path, sample_text: str, conf_extras: str = ""):
-    """Set up a minimal Sphinx project that uses the :vtk: role directly in index.rst."""
+def _rst_to_myst_role(code_block: str) -> str:
+    """Translate ``:vtk:`content``` occurrences to MyST's ``{vtk}`content``` syntax.
+
+    The role content between the backticks (targets, titles, ``~`` prefixes) is
+    identical between the two syntaxes, so this is a purely mechanical swap of
+    the role's delimiters.
+    """
+    return re.sub(r":vtk:`([^`]*)`", r"{vtk}`\1`", code_block)
+
+
+def make_temp_doc_project(tmp_path, sample_text: str, conf_extras: str = "", filetype: str = "rst"):
+    """Set up a minimal Sphinx project that uses the :vtk: role directly in index.rst/md."""
     src = tmp_path / "src"
     src.mkdir()
 
-    # conf.py with the extension enabled
-    conf = "extensions = ['sphinx_vtk_xref']\n" + conf_extras
+    extensions = (
+        "['sphinx_vtk_xref']" if filetype == "rst" else "['sphinx_vtk_xref', 'myst_parser']"
+    )
+    conf = f"extensions = {extensions}\n"
+    if filetype == "md":
+        conf += "source_suffix = {'.md': 'markdown'}\n"
+    conf += conf_extras
     (src / "conf.py").write_text(conf)
 
-    # Write index.rst with sample text
-    lines = [
-        "Test Page",
-        "=========",
-        "",
-        sample_text.strip(),
-        "",
-    ]
-    (src / "index.rst").write_text("\n".join(lines))
+    if filetype == "rst":
+        lines = [
+            "Test Page",
+            "=========",
+            "",
+            sample_text.strip(),
+            "",
+        ]
+        (src / "index.rst").write_text("\n".join(lines))
+    else:
+        lines = [
+            "# Test Page",
+            "",
+            _rst_to_myst_role(sample_text.strip()),
+            "",
+        ]
+        (src / "index.md").write_text("\n".join(lines))
 
     return src
 
@@ -147,8 +170,9 @@ def make_temp_doc_project(tmp_path, sample_text: str, conf_extras: str = ""):
         ),
     ],
 )
-def test_vtk_role(tmp_path, code_block, expected_links, expected_warning):
-    doc_project = make_temp_doc_project(tmp_path, code_block)
+@pytest.mark.parametrize("filetype", ["rst", "md"])
+def test_vtk_role(tmp_path, code_block, expected_links, expected_warning, filetype):
+    doc_project = make_temp_doc_project(tmp_path, code_block, filetype=filetype)
     build_dir = tmp_path / "_build"
     build_html_dir = build_dir / "html"
 
@@ -195,6 +219,46 @@ def test_vtk_role(tmp_path, code_block, expected_links, expected_warning):
         assert link is not None, f'Expected link with href="{href}" not found'
         assert link.text == expected_text, (
             f'Expected link text "{expected_text}", got "{link.text}"'
+        )
+
+
+@pytest.mark.parametrize(("filetype", "source_name"), [("rst", "index.rst"), ("md", "index.md")])
+def test_warning_location_has_single_suffix(tmp_path, filetype, source_name):
+    """Warnings must report ``index.rst:N``/``index.md:N``, not a doubled suffix.
+
+    Regression test: the role used to build its warning location from
+    ``document.current_source`` (already a full path) wrapped in a
+    ``(docname, lineno)`` tuple, which Sphinx then re-suffixes via
+    ``env.doc2path``, doubling the extension (e.g. ``index.rst.rst``).
+    """
+    code_block = ":vtk:`NonExistentClass`"
+    doc_project = make_temp_doc_project(tmp_path, code_block, filetype=filetype)
+    build_html_dir = tmp_path / "_build" / "html"
+
+    result = subprocess.run(  # noqa: UP022
+        [
+            sys.executable,
+            "-msphinx",
+            "-b",
+            "html",
+            str(doc_project),
+            str(build_html_dir),
+            "-W",
+            "--keep-going",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    stderr = result.stderr.decode("utf-8", errors="replace")
+    print("STDERR:\n", stderr)
+
+    if not sys.platform.startswith("win"):
+        assert re.search(rf"{re.escape(source_name)}:\d+:", stderr), (
+            f"Expected '{source_name}:<N>:' in:\n{stderr}"
+        )
+        doubled_suffix = source_name + Path(source_name).suffix
+        assert doubled_suffix not in stderr, (
+            f"Found doubled suffix '{doubled_suffix}' in:\n{stderr}"
         )
 
 
