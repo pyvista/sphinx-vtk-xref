@@ -184,14 +184,14 @@ class VTKRole(ReferenceRole):
         logger.info(
             f"Ignoring HTTP {status_code} {reason} for VTK class reference: "
             f"'{cls_name}' → {_vtk_class_url(cls_name)}",
-            location=(self.inliner.document.current_source, self.lineno),
+            location=self.get_location(),
             type="sphinx-vtk-xref",
         )
 
     def _issue_warning(self, msg):
         logger.warning(
             msg,
-            location=(self.inliner.document.current_source, self.lineno),
+            location=self.get_location(),
             type="sphinx-vtk-xref",
         )
 

@@ -14,9 +14,12 @@ Installation
 
         pip install sphinx-vtk-xref
 
+#.  Add ``sphinx_vtk_xref`` as an extension in your ``conf.py`` file used by
+    Sphinx. The exact setup depends on whether your documentation is written
+    in reStructuredText or Markdown.
 
-#.  Add ``sphinx_vtk_xref`` as an extension in your ``conf.py`` file
-    used by Sphinx:
+reStructuredText
+~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -24,6 +27,27 @@ Installation
         ...,
         'sphinx_vtk_xref',
     ]
+
+Markdown (MyST)
+~~~~~~~~~~~~~~~
+
+Markdown support requires `MyST-Parser <https://myst-parser.readthedocs.io>`_,
+which dispatches Sphinx roles like ``:vtk:`` using its own ``{vtk}`` syntax.
+
+.. code-block:: bash
+
+    pip install myst-parser
+
+.. code-block:: python
+
+    extensions = [
+        ...,
+        'sphinx_vtk_xref',
+        'myst_parser',
+    ]
+    source_suffix = {
+        '.md': 'markdown',
+    }
 
 Usage
 -----
@@ -33,20 +57,29 @@ Usage
   to the ``vtkImageData`` documentation. This will render as
   `vtkImageData <https://vtk.org/doc/nightly/html/classvtkImageData.html>`_.
 
+  If using MyST, use ``{vtk}`vtkImageData``` instead.
+
 - Link directly to class members such as methods or enums. For example,
   write ``:vtk:`vtkImageData.GetSpacing``` to link directly to the
   ``GetSpacing`` method. This will render as
   `vtkImageData.GetSpacing <https://vtk.org/doc/nightly/html/classvtkImageData.html#ae6ebee83577b2d58c393a0df2f15b67d>`_.
+
+  If using MyST, use ``{vtk}`vtkImageData.GetSpacing``` instead.
 
 - Use ``~`` to shorten the title for the link and only show the class member
   after the period. For example, ``:vtk:`~vtkImageData.GetSpacing```
   will render as
   `GetSpacing <https://vtk.org/doc/nightly/html/classvtkImageData.html#ae6ebee83577b2d58c393a0df2f15b67d>`_.
 
+  If using MyST, use ``{vtk}`~vtkImageData.GetSpacing``` instead.
+
 - Provide a custom title for the reference. For example,
   ``:vtk:`Get Image Spacing <vtkImageData.GetSpacing>```
   will render as
   `Get Image Spacing <https://vtk.org/doc/nightly/html/classvtkImageData.html#ae6ebee83577b2d58c393a0df2f15b67d>`_
+
+  If using MyST, use ``{vtk}`Get Image Spacing <vtkImageData.GetSpacing>```
+  instead.
 
 Configuration
 -------------
