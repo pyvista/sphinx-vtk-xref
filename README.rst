@@ -66,6 +66,25 @@ Usage
 
   If using MyST, use ``{vtk}`vtkImageData.GetSpacing``` instead.
 
+- Write enum values the way they appear in code: with or without their enum,
+  and with either separator. All four of these link to the same
+  ``COMPOSITE_BLEND`` anchor.
+
+  .. code-block:: rst
+
+      :vtk:`vtkVolumeMapper.COMPOSITE_BLEND`
+      :vtk:`vtkVolumeMapper::COMPOSITE_BLEND`
+      :vtk:`vtkVolumeMapper.BlendModes.COMPOSITE_BLEND`
+      :vtk:`vtkVolumeMapper::BlendModes::COMPOSITE_BLEND`
+
+  Naming the enum is required for a scoped ``enum class``, where
+  ``:vtk:`vtkProperty::Point2DShapeType::Round``` is the only way to spell the
+  value in C++.
+
+- ``.`` and ``::`` are interchangeable separators, and a trailing argument list
+  is ignored, so ``:vtk:`vtkImageData::GetSpacing()``` and
+  ``:vtk:`vtkImageData.GetSpacing``` are the same reference.
+
 - Use ``~`` to shorten the title for the link and only show the class member
   after the period. For example, ``:vtk:`~vtkImageData.GetSpacing```
   will render as
@@ -119,7 +138,7 @@ Notes
   will still try to point to a valid URL where possible. Combine this with
   Sphinx's own ``-W`` flag to fail the build on invalid links.
 
-- Enum values are referenced through their class, not through their enum. For
-  example, ``:vtk:`vtkCommand.PickEvent``` links to the ``PickEvent`` value of
-  the ``EventIds`` enum, but ``:vtk:`vtkCommand.EventIds.PickEvent``` does not
-  resolve, since the role does not support nested members.
+- A reference is resolved from its most specific component that matches, so the
+  class must come first. A module-qualified path such as
+  ``:vtk:`vtk.vtkVolumeMapper.COMPOSITE_BLEND``` is not supported, and reports
+  ``vtk`` as an invalid class.

@@ -20,6 +20,7 @@ import requests
 from sphinx_vtk_xref import DEFAULT_IGNORED_STATUS_CODES
 from sphinx_vtk_xref import VTKRole
 from sphinx_vtk_xref import _find_member_anchor
+from sphinx_vtk_xref import _split_reference
 from sphinx_vtk_xref import _vtk_class_url
 
 GET_SPACING_ANCHOR = "ae6ebee83577b2d58c393a0df2f15b67d"
@@ -34,6 +35,23 @@ BLEND_MODES_ANCHOR = "aac00c48c3211f5dba0ca98c7a028e409"
 COMPOSITE_BLEND_ANCHOR = f"{BLEND_MODES_ANCHOR}a92f6946039dfe09ac64649a5f661d7bf"
 COMPOSITE_BLEND_URL = f"{_vtk_class_url('vtkVolumeMapper')}#{COMPOSITE_BLEND_ANCHOR}"
 GET_BLEND_MODE_ANCHOR = "ab0d85bd1de808a39ac802f84de3ed1b1"
+
+# ``Round`` is a value of the scoped ``enum class vtkProperty::Point2DShapeType``.
+ROUND_ANCHOR = "a523ae84669eb187a1a24c08b7ec0e74fab7f41fc1412ad2ee75e9b2635d3b9d5c"
+ROUND_URL = f"{_vtk_class_url('vtkProperty')}#{ROUND_ANCHOR}"
+
+#: Spellings that a reasonable user may write, and the anchor each resolves to.
+#: Each renders with its target as the link text.
+REFERENCE_SPELLINGS = {
+    "vtkVolumeMapper::COMPOSITE_BLEND": COMPOSITE_BLEND_URL,
+    "vtkVolumeMapper.BlendModes.COMPOSITE_BLEND": COMPOSITE_BLEND_URL,
+    "vtkVolumeMapper::BlendModes::COMPOSITE_BLEND": COMPOSITE_BLEND_URL,
+    "vtkProperty.Point2DShapeType.Round": ROUND_URL,
+    "vtkProperty::Point2DShapeType::Round": ROUND_URL,
+    "vtkImageData.GetSpacing()": GET_SPACING_URL,
+    "vtkImageData::GetSpacing": GET_SPACING_URL,
+    "vtkImageData::GetSpacing()": GET_SPACING_URL,
+}
 
 ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[.*?m")
 
@@ -117,6 +135,50 @@ def test_exact_member_name_is_preferred(vtk_volume_mapper_html, vtk_selection_no
 
     # Names with no exact match still resolve by substring, as before.
     assert _find_member_anchor(vtk_volume_mapper_html, "GetBlendMode()") == GET_BLEND_MODE_ANCHOR
+
+
+@pytest.mark.parametrize(
+    ("target", "expected"),
+    [
+        ("vtkImageData", ("vtkImageData", [])),
+        ("vtkImageData.", ("vtkImageData", [])),
+        ("vtkImageData.GetSpacing", ("vtkImageData", ["GetSpacing"])),
+        ("vtkImageData::GetSpacing", ("vtkImageData", ["GetSpacing"])),
+        ("vtkImageData::GetSpacing()", ("vtkImageData", ["GetSpacing"])),
+        ("vtkImageData.GetSpacing(double x)", ("vtkImageData", ["GetSpacing"])),
+        (
+            "vtkVolumeMapper::BlendModes::COMPOSITE_BLEND",
+            ("vtkVolumeMapper", ["BlendModes", "COMPOSITE_BLEND"]),
+        ),
+    ],
+)
+def test_split_reference(target, expected):
+    """References split on both ``.`` and ``::``, ignoring any argument list."""
+    assert _split_reference(target) == expected
+
+
+def test_reference_spellings(tmp_path):
+    """Every spelling of a member a reasonable user may write resolves the same way."""
+    targets = [*REFERENCE_SPELLINGS, "~vtkVolumeMapper::BlendModes::COMPOSITE_BLEND"]
+    code_block = "\n".join(f":vtk:`{target}`\n" for target in targets)
+    doc_project = make_temp_doc_project(tmp_path, code_block)
+    build_dir = tmp_path / "_build"
+
+    result = _build_docs(doc_project, build_dir)
+    print("STDERR:\n", result.stderr)
+    assert result.returncode == 0, f"Unexpected failure in Sphinx build:\n{result.stderr}"
+
+    html = (build_dir / "html" / "index.html").read_text(encoding="utf-8")
+    soup = BeautifulSoup(html, "html.parser")
+    for target, expected_url in REFERENCE_SPELLINGS.items():
+        link = soup.find("a", string=target)
+        assert link is not None, f"Expected a link labelled {target!r}"
+        assert link["href"] == expected_url, f"Wrong anchor for {target!r}"
+
+    # ``~`` shortens the title to the last component of a ``::`` reference too
+    link = soup.find("a", string="COMPOSITE_BLEND")
+    assert link is not None
+    assert link["href"] == COMPOSITE_BLEND_URL
 
 
 def _rst_to_myst_role(code_block: str) -> str:
