@@ -156,14 +156,14 @@ class VTKRole(ReferenceRole):
 
     def _ignored_status_codes(self):
         try:
-            codes = self.env.config.sphinx_vtk_xref_ignored_status_codes
+            codes = self.env.config.vtk_xref_ignored_status_codes
         except AttributeError:
             return DEFAULT_IGNORED_STATUS_CODES
         return frozenset(codes)
 
     def _nitpicky(self):
         try:
-            return bool(self.env.config.sphinx_vtk_xref_nitpicky)
+            return bool(self.env.config.vtk_xref_nitpicky)
         except AttributeError:
             return True
 
@@ -277,13 +277,13 @@ def _find_enumerator_anchor(soup: BeautifulSoup, member_name: str) -> str | None
 def setup(app):
     app.add_role("vtk", VTKRole())
     app.add_config_value(
-        "sphinx_vtk_xref_ignored_status_codes",
+        "vtk_xref_ignored_status_codes",
         DEFAULT_IGNORED_STATUS_CODES,
         "env",
         types=(frozenset, set, list, tuple),
     )
     app.add_config_value(
-        "sphinx_vtk_xref_nitpicky",
+        "vtk_xref_nitpicky",
         True,
         "env",
         types=(bool,),

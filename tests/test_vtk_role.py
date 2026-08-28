@@ -392,13 +392,13 @@ def test_warning_location_has_single_suffix(tmp_path, filetype, source_name):
 
 
 def test_ignored_status_codes(tmp_path):
-    """A status code in ``sphinx_vtk_xref_ignored_status_codes`` must not fail ``-W`` builds.
+    """A status code in ``vtk_xref_ignored_status_codes`` must not fail ``-W`` builds.
 
     Asking vtk.org for a non-existent class returns a 404. Adding 404 to the
     ignored set should turn that into a non-fatal info log so ``-W`` still passes.
     """
     code_block = ":vtk:`NonExistentClass`"
-    conf_extras = "sphinx_vtk_xref_ignored_status_codes = {404}\n"
+    conf_extras = "vtk_xref_ignored_status_codes = {404}\n"
     doc_project = make_temp_doc_project(tmp_path, code_block, conf_extras=conf_extras)
     build_dir = tmp_path / "_build"
     build_html_dir = build_dir / "html"
@@ -423,7 +423,7 @@ def test_ignored_status_codes(tmp_path):
 
 
 def test_nitpicky_disabled(tmp_path):
-    """``sphinx_vtk_xref_nitpicky = False`` must skip link checking entirely.
+    """``vtk_xref_nitpicky = False`` must skip link checking entirely.
 
     An otherwise-invalid class reference and an unresolved member reference
     should build cleanly, with no warning and no anchor resolution, since no
@@ -433,7 +433,7 @@ def test_nitpicky_disabled(tmp_path):
     :vtk:`NonExistentClass`
     :vtk:`vtkImageData.GetSpacing`
     """)
-    conf_extras = "sphinx_vtk_xref_nitpicky = False\n"
+    conf_extras = "vtk_xref_nitpicky = False\n"
     doc_project = make_temp_doc_project(tmp_path, code_block, conf_extras=conf_extras)
     build_dir = tmp_path / "_build"
     build_html_dir = build_dir / "html"
@@ -491,7 +491,7 @@ def test_nitpicky_disabled_makes_no_http_requests(tmp_path):
     :vtk:`NonExistentClass`
     :vtk:`vtkImageData.GetSpacing`
     """)
-    conf_extras = "sphinx_vtk_xref_nitpicky = False\n"
+    conf_extras = "vtk_xref_nitpicky = False\n"
     doc_project = make_temp_doc_project(tmp_path, code_block, conf_extras=conf_extras)
     build_dir = tmp_path / "_build"
 
@@ -530,7 +530,7 @@ def test_ignored_status_code_with_member(tmp_path):
     VTKRole.resolved_urls.clear()
 
     code_block = ":vtk:`vtkImageData.GetSpacing`"
-    conf_extras = "sphinx_vtk_xref_ignored_status_codes = {503}\n"
+    conf_extras = "vtk_xref_ignored_status_codes = {503}\n"
     doc_project = make_temp_doc_project(tmp_path, code_block, conf_extras=conf_extras)
     build_dir = tmp_path / "_build"
 
