@@ -92,6 +92,33 @@ def test_find_enumerator_anchor(vtk_volume_mapper_html):
     assert _find_member_anchor(vtk_volume_mapper_html, "FAKE_BLEND") is None
 
 
+@pytest.fixture(scope="module")
+def vtk_selection_node_html():
+    """Fixture that fetches HTML for vtkSelectionNode once per test module."""
+    response = requests.get(_vtk_class_url("vtkSelectionNode"), timeout=30)
+    response.raise_for_status()
+    return response.text
+
+
+def test_exact_member_name_is_preferred(vtk_volume_mapper_html, vtk_selection_node_html):
+    """An exact member name wins over the substring fallback, which still applies."""
+    # ``BlendMode`` is a protected attribute whose name is a substring of the
+    # ``BlendModes`` enum's memtitle.
+    blend_mode = _find_member_anchor(vtk_volume_mapper_html, "BlendMode")
+    assert blend_mode is not None
+    assert blend_mode != BLEND_MODES_ANCHOR
+
+    # An enum value also wins over a method that merely contains its name.
+    cell = _find_member_anchor(vtk_selection_node_html, "CELL")
+    cellgrid = _find_member_anchor(vtk_selection_node_html, "CELLGRID_CELL_TYPE_INDEX")
+    assert cell is not None
+    assert cellgrid is not None
+    assert cell != cellgrid
+
+    # Names with no exact match still resolve by substring, as before.
+    assert _find_member_anchor(vtk_volume_mapper_html, "GetBlendMode()") == GET_BLEND_MODE_ANCHOR
+
+
 def _rst_to_myst_role(code_block: str) -> str:
     """Translate ``:vtk:`content``` occurrences to MyST's ``{vtk}`content``` syntax.
 

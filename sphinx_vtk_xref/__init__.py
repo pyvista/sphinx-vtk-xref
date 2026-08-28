@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from http import HTTPStatus
 from typing import TYPE_CHECKING
+import re
 
 from bs4 import BeautifulSoup
 from docutils import nodes
@@ -18,6 +19,10 @@ if TYPE_CHECKING:
 
 #: Timeout (in seconds) for HTTP requests to the VTK documentation server.
 HTTP_TIMEOUT = 30
+
+#: The bare member name of a Doxygen ``memtitle`` header, i.e. the ``GetSpacing``
+#: of ``◆ GetSpacing() [1/3]``.
+MEMTITLE_NAME_PATTERN = re.compile(r"[\s◆]*([^\s(]+)")
 
 #: HTTP status codes that, by default, do not fail the build. These typically
 #: indicate a transient server-side issue (rate limiting or upstream
@@ -204,14 +209,26 @@ def _vtk_class_url(cls_name):
 def _find_member_anchor(html: str, member_name: str) -> str | None:
     """Try to find the anchor ID for a method/attribute/enumerator in the HTML."""
     soup = BeautifulSoup(html, "html.parser")
-    return _find_memtitle_anchor(soup, member_name) or _find_enumerator_anchor(soup, member_name)
+    return (
+        _find_memtitle_anchor(soup, member_name, exact=True)
+        or _find_enumerator_anchor(soup, member_name)
+        or _find_memtitle_anchor(soup, member_name, exact=False)
+    )
 
 
-def _find_memtitle_anchor(soup: BeautifulSoup, member_name: str) -> str | None:
+def _memtitle_name(title: str) -> str:
+    """Return a ``memtitle`` header's member name, without its permalink or signature."""
+    match = MEMTITLE_NAME_PATTERN.match(title)
+    return match.group(1) if match else ""
+
+
+def _find_memtitle_anchor(soup: BeautifulSoup, member_name: str, *, exact: bool) -> str | None:
     """Find the anchor ID of a method or member variable from its ``memtitle`` header."""
     headers = soup.find_all(["h2", "h3"], class_="memtitle")
     for header in headers:
-        if member_name in header.get_text():
+        title = header.get_text()
+        matched = _memtitle_name(title) == member_name if exact else member_name in title
+        if matched:
             anchor = header.find_previous("a", id=True)
             if anchor:
                 return anchor["id"]
