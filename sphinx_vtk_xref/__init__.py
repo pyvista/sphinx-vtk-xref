@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from http import HTTPStatus
 from typing import TYPE_CHECKING
+import re
 
 from bs4 import BeautifulSoup
 from docutils import nodes
@@ -18,6 +19,14 @@ if TYPE_CHECKING:
 
 #: Timeout (in seconds) for HTTP requests to the VTK documentation server.
 HTTP_TIMEOUT = 30
+
+#: The bare member name of a Doxygen ``memtitle`` header, i.e. the ``GetSpacing``
+#: of ``◆ GetSpacing() [1/3]``.
+MEMTITLE_NAME_PATTERN = re.compile(r"[\s◆]*([^\s(]+)")
+
+#: A trailing C++ argument list on a member reference, i.e. the ``(double x)``
+#: of ``GetSpacing(double x)``.
+ARGUMENT_LIST_PATTERN = re.compile(r"\(.*\)\s*$")
 
 #: HTTP status codes that, by default, do not fail the build. These typically
 #: indicate a transient server-side issue (rate limiting or upstream
@@ -53,17 +62,11 @@ class VTKRole(ReferenceRole):
         if cls_full.startswith("~"):
             cls_full = cls_full[1:]
             if not self.has_explicit_title:
-                title = cls_full.split(".")[-1]
+                title = cls_full.replace("::", ".").split(".")[-1]
 
-        # Validate and split input like 'vtkClass.member'
-        parts = cls_full.split(".")
-        if len(parts) > 2:
-            cls_name = parts[0]
-            member_name = parts[1]
-            extra = ".".join(parts[2:])
-            self._warn_nested_members_ref(cls_name, member_name, extra)
-        else:
-            cls_name, member_name = parts[0], parts[1] if len(parts) == 2 else None
+        # Split input like 'vtkClass.member' or 'vtkClass::Enum::VALUE'
+        cls_name, member_path = _split_reference(cls_full)
+        member_name = ".".join(member_path) if member_path else None
         cls_url = _vtk_class_url(cls_name)
 
         if not self._nitpicky():
@@ -129,9 +132,11 @@ class VTKRole(ReferenceRole):
             node = nodes.reference(title, title, refuri=cls_url)
             return [node], []
 
-        if member_name:
-            anchor = _find_member_anchor(html, member_name)
+        if member_path:
+            anchor, ignored = _find_member_path_anchor(html, member_path)
             if anchor:
+                if ignored:
+                    self._warn_nested_members_ref(cls_name, member_path, ignored)
                 full_url = f"{cls_url}#{anchor}"
                 self.resolved_urls[cache_key] = full_url
                 node = nodes.reference(title, title, refuri=full_url)
@@ -174,10 +179,13 @@ class VTKRole(ReferenceRole):
             f"the class URL is used instead."
         )
 
-    def _warn_nested_members_ref(self, cls_name, member_name, extra):
+    def _warn_nested_members_ref(self, cls_name, member_path, ignored):
+        full = ".".join(member_path)
+        resolved = ".".join(member_path[: len(member_path) - len(ignored)])
+        extra = ".".join(ignored)
         self._issue_warning(
-            f"Too many nested members in VTK reference: '{cls_name}.{member_name}.{extra}'. "
-            f"Interpreting as '{cls_name}.{member_name}', ignoring: '{extra}'"
+            f"Too many nested members in VTK reference: '{cls_name}.{full}'. "
+            f"Interpreting as '{cls_name}.{resolved}', ignoring: '{extra}'"
         )
 
     def _info_ignored_class_ref(self, cls_name, status_code, reason):
@@ -201,15 +209,68 @@ def _vtk_class_url(cls_name):
     return f"https://vtk.org/doc/nightly/html/class{cls_name}.html"
 
 
-def _find_member_anchor(html: str, member_name: str) -> str | None:
-    """Try to find the anchor ID for a method/attribute in the HTML."""
+def _split_reference(target: str) -> tuple[str, list[str]]:
+    """Split a reference into its class name and the member path below it."""
+    # `::` separators and trailing argument lists are how VTK's own C++ docs
+    # spell members, so accept them alongside the dotted Python spelling.
+    parts = ARGUMENT_LIST_PATTERN.sub("", target.replace("::", ".")).split(".")
+    return parts[0], [part for part in parts[1:] if part]
+
+
+def _find_member_path_anchor(html: str, member_path: list[str]) -> tuple[str | None, list[str]]:
+    """Find the anchor for the most specific component of a member path that resolves."""
+    # An enum value may be written bare or qualified by its enum, and a scoped
+    # enum can only be written qualified, so the last component is tried first.
     soup = BeautifulSoup(html, "html.parser")
+    for index in reversed(range(len(member_path))):
+        anchor = _find_anchor(soup, member_path[index])
+        if anchor:
+            return anchor, member_path[index + 1 :]
+    return None, []
+
+
+def _find_member_anchor(html: str, member_name: str) -> str | None:
+    """Try to find the anchor ID for a method/attribute/enumerator in the HTML."""
+    anchor, _ = _find_member_path_anchor(html, [member_name])
+    return anchor
+
+
+def _find_anchor(soup: BeautifulSoup, member_name: str) -> str | None:
+    """Find the anchor ID for a single member name, most specific match first."""
+    return (
+        _find_memtitle_anchor(soup, member_name, exact=True)
+        or _find_enumerator_anchor(soup, member_name)
+        or _find_memtitle_anchor(soup, member_name, exact=False)
+    )
+
+
+def _memtitle_name(title: str) -> str:
+    """Return a ``memtitle`` header's member name, without its permalink or signature."""
+    match = MEMTITLE_NAME_PATTERN.match(title)
+    return match.group(1) if match else ""
+
+
+def _find_memtitle_anchor(soup: BeautifulSoup, member_name: str, *, exact: bool) -> str | None:
+    """Find the anchor ID of a method or member variable from its ``memtitle`` header."""
     headers = soup.find_all(["h2", "h3"], class_="memtitle")
     for header in headers:
-        if member_name in header.get_text():
+        title = header.get_text()
+        matched = _memtitle_name(title) == member_name if exact else member_name in title
+        if matched:
             anchor = header.find_previous("a", id=True)
             if anchor:
                 return anchor["id"]
+    return None
+
+
+def _find_enumerator_anchor(soup: BeautifulSoup, member_name: str) -> str | None:
+    """Find the anchor ID of an enumerator from its row in the enum's value table."""
+    # Doxygen documents enumerators as rows of a table inside the enum's own
+    # ``memitem`` block, so they have no ``memtitle`` header of their own.
+    for cell in soup.select("table.fieldtable td.fieldname"):
+        anchor = cell.find("a", id=True)
+        if anchor and cell.get_text(strip=True) == member_name:
+            return anchor["id"]
     return None
 
 
