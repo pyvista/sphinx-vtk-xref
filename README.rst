@@ -86,7 +86,7 @@ Configuration
 
 The following options can be set in ``conf.py``:
 
-``sphinx_vtk_xref_nitpicky``
+``vtk_xref_nitpicky``
   Bool, default ``True``. Set to ``False`` to disable ``:vtk:`` link
   checking. This is independent of Sphinx's own ``nitpicky`` option, so
   you can turn off ``:vtk:`` link validation without affecting how the rest
@@ -97,9 +97,9 @@ The following options can be set in ``conf.py``:
 
   .. code-block:: python
 
-      sphinx_vtk_xref_nitpicky = False
+      vtk_xref_nitpicky = False
 
-``sphinx_vtk_xref_ignored_status_codes``
+``vtk_xref_ignored_status_codes``
   Collection of HTTP status codes, default ``{429, 500, 502, 503, 504}``.
   These codes typically indicate a transient server-side issue (rate
   limiting or upstream unavailability) rather than a genuinely-invalid
@@ -109,7 +109,7 @@ The following options can be set in ``conf.py``:
 
   .. code-block:: python
 
-      sphinx_vtk_xref_ignored_status_codes = {404}
+      vtk_xref_ignored_status_codes = {404}
 
 Notes
 -----
