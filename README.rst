@@ -59,12 +59,31 @@ Usage
 
   If using MyST, use ``{vtk}`vtkImageData``` instead.
 
-- Link directly to class members such as methods or enums. For example,
-  write ``:vtk:`vtkImageData.GetSpacing``` to link directly to the
+- Link directly to class members such as methods, enums, or enum values. For
+  example, write ``:vtk:`vtkImageData.GetSpacing``` to link directly to the
   ``GetSpacing`` method. This will render as
   `vtkImageData.GetSpacing <https://vtk.org/doc/nightly/html/classvtkImageData.html#ae6ebee83577b2d58c393a0df2f15b67d>`_.
 
   If using MyST, use ``{vtk}`vtkImageData.GetSpacing``` instead.
+
+- Write enum values the way they appear in code: with or without their enum,
+  and with either separator. All four of these link to the same
+  ``COMPOSITE_BLEND`` anchor.
+
+  .. code-block:: rst
+
+      :vtk:`vtkVolumeMapper.COMPOSITE_BLEND`
+      :vtk:`vtkVolumeMapper::COMPOSITE_BLEND`
+      :vtk:`vtkVolumeMapper.BlendModes.COMPOSITE_BLEND`
+      :vtk:`vtkVolumeMapper::BlendModes::COMPOSITE_BLEND`
+
+  Naming the enum is required for a scoped ``enum class``, where
+  ``:vtk:`vtkProperty::Point2DShapeType::Round``` is the only way to spell the
+  value in C++.
+
+- ``.`` and ``::`` are interchangeable separators, and a trailing argument list
+  is ignored, so ``:vtk:`vtkImageData::GetSpacing()``` and
+  ``:vtk:`vtkImageData.GetSpacing``` are the same reference.
 
 - Use ``~`` to shorten the title for the link and only show the class member
   after the period. For example, ``:vtk:`~vtkImageData.GetSpacing```
@@ -119,7 +138,7 @@ Notes
   will still try to point to a valid URL where possible. Combine this with
   Sphinx's own ``-W`` flag to fail the build on invalid links.
 
-- The role does not currently support linking to nested members. For example,
-  linking to an enum member with ``:vtk:`vtkCommand.EventIds``` works,
-  but linking to a specific enum value with ``:vtk:`vtkCommand.EventIds.PickEvent```
-  does not.
+- A reference is resolved from its most specific component that matches, so the
+  class must come first. A module-qualified path such as
+  ``:vtk:`vtk.vtkVolumeMapper.COMPOSITE_BLEND``` is not supported, and reports
+  ``vtk`` as an invalid class.
