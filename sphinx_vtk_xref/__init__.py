@@ -202,14 +202,30 @@ def _vtk_class_url(cls_name):
 
 
 def _find_member_anchor(html: str, member_name: str) -> str | None:
-    """Try to find the anchor ID for a method/attribute in the HTML."""
+    """Try to find the anchor ID for a method/attribute/enumerator in the HTML."""
     soup = BeautifulSoup(html, "html.parser")
+    return _find_memtitle_anchor(soup, member_name) or _find_enumerator_anchor(soup, member_name)
+
+
+def _find_memtitle_anchor(soup: BeautifulSoup, member_name: str) -> str | None:
+    """Find the anchor ID of a method or member variable from its ``memtitle`` header."""
     headers = soup.find_all(["h2", "h3"], class_="memtitle")
     for header in headers:
         if member_name in header.get_text():
             anchor = header.find_previous("a", id=True)
             if anchor:
                 return anchor["id"]
+    return None
+
+
+def _find_enumerator_anchor(soup: BeautifulSoup, member_name: str) -> str | None:
+    """Find the anchor ID of an enumerator from its row in the enum's value table."""
+    # Doxygen documents enumerators as rows of a table inside the enum's own
+    # ``memitem`` block, so they have no ``memtitle`` header of their own.
+    for cell in soup.select("table.fieldtable td.fieldname"):
+        anchor = cell.find("a", id=True)
+        if anchor and cell.get_text(strip=True) == member_name:
+            return anchor["id"]
     return None
 
 

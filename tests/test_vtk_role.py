@@ -30,6 +30,11 @@ SET_ORIGIN_URL = f"{_vtk_class_url('vtkImageData')}#{SET_ORIGIN_ANCHOR}"
 EVENT_IDS_ANCHOR = "a59a8690330ebcb1af6b66b0f3121f8fe"
 EVENT_IDS_URL = f"{_vtk_class_url('vtkCommand')}#{EVENT_IDS_ANCHOR}"
 
+BLEND_MODES_ANCHOR = "aac00c48c3211f5dba0ca98c7a028e409"
+COMPOSITE_BLEND_ANCHOR = f"{BLEND_MODES_ANCHOR}a92f6946039dfe09ac64649a5f661d7bf"
+COMPOSITE_BLEND_URL = f"{_vtk_class_url('vtkVolumeMapper')}#{COMPOSITE_BLEND_ANCHOR}"
+GET_BLEND_MODE_ANCHOR = "ab0d85bd1de808a39ac802f84de3ed1b1"
+
 ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[.*?m")
 
 
@@ -55,6 +60,36 @@ def test_find_member_anchor(vtk_polydata_html):
     full_url = f"{_vtk_class_url('vtkPolyData')}#{anchor}"
     response = requests.get(full_url, timeout=30, allow_redirects=True)
     assert response.status_code == HTTPStatus.OK
+
+
+@pytest.fixture(scope="module")
+def vtk_volume_mapper_html():
+    """Fixture that fetches HTML for vtkVolumeMapper once per test module."""
+    response = requests.get(_vtk_class_url("vtkVolumeMapper"), timeout=30)
+    response.raise_for_status()
+    return response.text
+
+
+def test_find_enumerator_anchor(vtk_volume_mapper_html):
+    """Enumerators resolve to their own anchor, without disturbing method lookups."""
+    # Enumerators live in a table inside the enum's memitem block, not in a memtitle.
+    anchor = _find_member_anchor(vtk_volume_mapper_html, "COMPOSITE_BLEND")
+    assert anchor == COMPOSITE_BLEND_ANCHOR
+    assert f'id="{anchor}"' in vtk_volume_mapper_html
+
+    # Confirm that the final URL with anchor resolves
+    full_url = f"{_vtk_class_url('vtkVolumeMapper')}#{anchor}"
+    response = requests.get(full_url, timeout=30, allow_redirects=True)
+    assert response.status_code == HTTPStatus.OK
+
+    # The enclosing enum is still reachable through its memtitle header
+    assert _find_member_anchor(vtk_volume_mapper_html, "BlendModes") == BLEND_MODES_ANCHOR
+
+    # Methods are unaffected
+    assert _find_member_anchor(vtk_volume_mapper_html, "GetBlendMode") == GET_BLEND_MODE_ANCHOR
+
+    # An unknown enumerator-looking name is still unresolved
+    assert _find_member_anchor(vtk_volume_mapper_html, "FAKE_BLEND") is None
 
 
 def _rst_to_myst_role(code_block: str) -> str:
@@ -134,11 +169,13 @@ def make_temp_doc_project(tmp_path, sample_text: str, conf_extras: str = "", fil
             :vtk:`vtkImageData.GetSpacing`.
             :vtk:`vtkImageData.SetOrigin`
             :vtk:`vtkCommand.EventIds`
+            :vtk:`vtkVolumeMapper.COMPOSITE_BLEND`
             """),
             {
                 GET_SPACING_URL: "vtkImageData.GetSpacing",
                 SET_ORIGIN_URL: "vtkImageData.SetOrigin",
                 EVENT_IDS_URL: "vtkCommand.EventIds",
+                COMPOSITE_BLEND_URL: "vtkVolumeMapper.COMPOSITE_BLEND",
             },
             None,
         ),
@@ -163,6 +200,11 @@ def make_temp_doc_project(tmp_path, sample_text: str, conf_extras: str = "", fil
             ":vtk:`vtkImageData.FakeMethod`",
             {_vtk_class_url("vtkImageData"): "vtkImageData.FakeMethod"},
             "VTK method anchor not found for: 'vtkImageData.FakeMethod' → https://vtk.org/doc/nightly/html/classvtkImageData.html#<anchor>, the class URL is used instead. [sphinx-vtk-xref]",
+        ),
+        (  # Valid class with enums, invalid enumerator
+            ":vtk:`vtkVolumeMapper.FAKE_BLEND`",
+            {_vtk_class_url("vtkVolumeMapper"): "vtkVolumeMapper.FAKE_BLEND"},
+            "VTK method anchor not found for: 'vtkVolumeMapper.FAKE_BLEND' → https://vtk.org/doc/nightly/html/classvtkVolumeMapper.html#<anchor>, the class URL is used instead. [sphinx-vtk-xref]",
         ),
         (  # Invalid class
             ":vtk:`NonExistentClass`",
