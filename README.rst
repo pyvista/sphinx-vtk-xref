@@ -59,8 +59,8 @@ Usage
 
   If using MyST, use ``{vtk}`vtkImageData``` instead.
 
-- Link directly to class members such as methods or enums. For example,
-  write ``:vtk:`vtkImageData.GetSpacing``` to link directly to the
+- Link directly to class members such as methods, enums, or enum values. For
+  example, write ``:vtk:`vtkImageData.GetSpacing``` to link directly to the
   ``GetSpacing`` method. This will render as
   `vtkImageData.GetSpacing <https://vtk.org/doc/nightly/html/classvtkImageData.html#ae6ebee83577b2d58c393a0df2f15b67d>`_.
 
@@ -119,7 +119,7 @@ Notes
   will still try to point to a valid URL where possible. Combine this with
   Sphinx's own ``-W`` flag to fail the build on invalid links.
 
-- The role does not currently support linking to nested members. For example,
-  linking to an enum member with ``:vtk:`vtkCommand.EventIds``` works,
-  but linking to a specific enum value with ``:vtk:`vtkCommand.EventIds.PickEvent```
-  does not.
+- Enum values are referenced through their class, not through their enum. For
+  example, ``:vtk:`vtkCommand.PickEvent``` links to the ``PickEvent`` value of
+  the ``EventIds`` enum, but ``:vtk:`vtkCommand.EventIds.PickEvent``` does not
+  resolve, since the role does not support nested members.
