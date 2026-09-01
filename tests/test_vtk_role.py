@@ -477,11 +477,11 @@ def _build_in_process(doc_project, build_dir, **sphinx_kwargs):
 
 
 def test_nitpicky_disabled_makes_no_http_requests(tmp_path):
-    """No ``requests.get`` calls should happen when link checking is disabled.
+    """No requests should happen when link checking is disabled.
 
     Uses an in-process Sphinx build (rather than the subprocess-based builds
-    used elsewhere in this file) so that mocking ``requests.get`` here
-    actually takes effect for the role's code.
+    used elsewhere in this file) so that mocking the session here actually
+    takes effect for the role's code.
     """
     # The class-level cache persists across in-process builds; start clean so
     # a previous test can't hide a real network call behind a cache hit.
@@ -495,10 +495,14 @@ def test_nitpicky_disabled_makes_no_http_requests(tmp_path):
     doc_project = make_temp_doc_project(tmp_path, code_block, conf_extras=conf_extras)
     build_dir = tmp_path / "_build"
 
-    with patch("sphinx_vtk_xref.requests.get") as mock_get:
+    with (
+        patch("sphinx_vtk_xref._SESSION.get") as mock_get,
+        patch("sphinx_vtk_xref._SESSION.head") as mock_head,
+    ):
         _build_in_process(doc_project, build_dir, warningiserror=True)
 
     mock_get.assert_not_called()
+    mock_head.assert_not_called()
 
 
 def test_nitpicky_enabled_makes_http_requests(tmp_path):
@@ -513,10 +517,28 @@ def test_nitpicky_enabled_makes_http_requests(tmp_path):
     doc_project = make_temp_doc_project(tmp_path, code_block)
     build_dir = tmp_path / "_build"
 
-    with patch("sphinx_vtk_xref.requests.get", wraps=requests.get) as mock_get:
+    with patch("sphinx_vtk_xref._SESSION.get", wraps=requests.get) as mock_get:
         _build_in_process(doc_project, build_dir, warningiserror=True)
 
     mock_get.assert_called_once()
+
+
+def test_a_class_reference_is_validated_without_downloading_the_page(tmp_path):
+    """A reference with no member needs the status only, so it must not use GET."""
+    VTKRole.resolved_urls.clear()
+
+    doc_project = make_temp_doc_project(tmp_path, ":vtk:`vtkImageData`")
+    build_dir = tmp_path / "_build"
+
+    with (
+        patch("sphinx_vtk_xref._SESSION.head", wraps=requests.head) as mock_head,
+        patch("sphinx_vtk_xref._SESSION.get", wraps=requests.get) as mock_get,
+    ):
+        _build_in_process(doc_project, build_dir, warningiserror=True)
+
+    mock_head.assert_called_once()
+    mock_get.assert_not_called()
+    assert VTKRole.resolved_urls[("vtkImageData", None)] == _vtk_class_url("vtkImageData")
 
 
 def test_ignored_status_code_with_member(tmp_path):
@@ -535,7 +557,7 @@ def test_ignored_status_code_with_member(tmp_path):
     build_dir = tmp_path / "_build"
 
     mock_response = Mock(status_code=503, reason="Service Unavailable", text="")
-    with patch("sphinx_vtk_xref.requests.get", return_value=mock_response):
+    with patch("sphinx_vtk_xref._SESSION.get", return_value=mock_response):
         _build_in_process(doc_project, build_dir, warningiserror=True)
 
     class_url = _vtk_class_url("vtkImageData")

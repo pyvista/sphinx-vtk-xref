@@ -20,6 +20,9 @@ if TYPE_CHECKING:
 #: Timeout (in seconds) for HTTP requests to the VTK documentation server.
 HTTP_TIMEOUT = 30
 
+#: Shared across every lookup, so the connection to the server is reused.
+_SESSION = requests.Session()
+
 #: The bare member name of a Doxygen ``memtitle`` header, i.e. the ``GetSpacing``
 #: of ``◆ GetSpacing() [1/3]``.
 MEMTITLE_NAME_PATTERN = re.compile(r"[\s◆]*([^\s(]+)")
@@ -101,13 +104,15 @@ class VTKRole(ReferenceRole):
         status_code: int | None = None
         status_reason = ""
         try:
-            response = requests.get(cls_url, timeout=HTTP_TIMEOUT)
+            # Only an anchor lookup needs the page body; otherwise the status is enough.
+            fetch = _SESSION.get if member_path else _SESSION.head
+            response = fetch(cls_url, timeout=HTTP_TIMEOUT)
             status_code = response.status_code
             status_reason = response.reason or ""
             if status_code != HTTPStatus.OK:
                 msg = f"HTTP {status_code} {status_reason}".strip()
                 raise requests.RequestException(msg)
-            html = response.text
+            html = response.text if member_path else ""
         except requests.RequestException as exc:
             if status_code is not None and status_code in self._ignored_status_codes():
                 # Transient server issue — do not fail the build. Emit an info
