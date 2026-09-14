@@ -34,7 +34,7 @@ parallel = true
 source = ['sphinx_vtk_xref']
 
 [tool.pytest.ini_options]
-addopts = "--cov=sphinx_vtk_xref --cov-fail-under=85"
+addopts = "--cov=sphinx_vtk_xref --cov-fail-under=85 -rs"
 testpaths = 'tests'
 
 [tool.ruff]
