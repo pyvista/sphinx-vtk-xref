@@ -13,6 +13,10 @@ import textwrap
 import filecmp
 
 from bs4 import BeautifulSoup
+from docutils import frontend
+from docutils import nodes
+from docutils import utils
+from docutils.parsers import rst
 from sphinx.application import Sphinx
 import pytest
 import requests
@@ -577,16 +581,38 @@ def test_ignored_status_codes_defaults_without_config_value():
         assert role._ignored_status_codes() == DEFAULT_IGNORED_STATUS_CODES
 
 
-def test_nitpicky_defaults_true_without_config_value():
-    """Falls back to ``nitpicky=True`` if the config value is missing.
-
-    The config value is always registered by ``setup()`` in real builds; this
-    guards the defensive fallback for callers that access the role directly.
-    """
+def test_nitpicky_defaults_false_without_config_value():
+    """Falls back to ``nitpicky=False`` if the config value is missing."""
     role = VTKRole.__new__(VTKRole)
     fake_env = SimpleNamespace(config=SimpleNamespace())
     with patch.object(VTKRole, "env", fake_env):
-        assert role._nitpicky() is True
+        assert role._nitpicky() is False
+
+
+def test_nitpicky_is_off_without_an_environment():
+    """A document with no Sphinx environment must not be link checked.
+
+    ``sphinx.ext.autosummary`` parses the summary line of a docstring in a bare
+    docutils document, so ``self.env`` raises and the config cannot be read.
+    """
+    settings = frontend.get_default_settings(rst.Parser)
+    settings.report_level = 5
+    document = utils.new_document("", settings)
+    assert not hasattr(settings, "env")
+
+    role = VTKRole()
+    rst.roles.register_local_role("vtk", role)
+    with (
+        patch("sphinx_vtk_xref._SESSION.get") as mock_get,
+        patch("sphinx_vtk_xref._SESSION.head") as mock_head,
+    ):
+        rst.Parser().parse("Apply a :vtk:`vtkThreshold` filter.", document)
+
+    mock_get.assert_not_called()
+    mock_head.assert_not_called()
+    assert role._nitpicky() is False
+    reference = next(iter(document.findall(nodes.reference)))
+    assert reference["refuri"] == _vtk_class_url("vtkThreshold")
 
 
 def _check_html_content(html_path, expected_links):

@@ -170,7 +170,8 @@ class VTKRole(ReferenceRole):
         try:
             return bool(self.env.config.vtk_xref_nitpicky)
         except AttributeError:
-            return True
+            # Link checking is opt-in, and the config is unreadable outside a build
+            return False
 
     def _warn_invalid_class_ref(self, cls_name, reason=None):
         suffix = f" ({reason})" if reason else ""
