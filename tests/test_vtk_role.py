@@ -4,6 +4,7 @@ from __future__ import annotations
 from subprocess import run
 from pathlib import Path
 from http import HTTPStatus
+from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import Mock
 from unittest.mock import patch
@@ -13,10 +14,17 @@ import textwrap
 import filecmp
 
 from bs4 import BeautifulSoup
+from docutils import frontend
+from docutils import nodes
+from docutils import utils
+from docutils.parsers import rst
 from sphinx.application import Sphinx
 import pytest
 import requests
 
+from conftest import UNREACHABLE_MESSAGE
+from conftest import get_or_skip
+from conftest import skip_if_unreachable
 from sphinx_vtk_xref import DEFAULT_IGNORED_STATUS_CODES
 from sphinx_vtk_xref import VTKRole
 from sphinx_vtk_xref import _find_member_anchor
@@ -59,9 +67,7 @@ ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[.*?m")
 @pytest.fixture(scope="module")
 def vtk_polydata_html():
     """Fixture that fetches HTML for vtkPolyData once per test module."""
-    response = requests.get(_vtk_class_url("vtkPolyData"), timeout=30)
-    response.raise_for_status()
-    return response.text
+    return get_or_skip(_vtk_class_url("vtkPolyData")).text
 
 
 def test_find_member_anchor(vtk_polydata_html):
@@ -76,16 +82,13 @@ def test_find_member_anchor(vtk_polydata_html):
 
     # Confirm that the final URL with anchor resolves
     full_url = f"{_vtk_class_url('vtkPolyData')}#{anchor}"
-    response = requests.get(full_url, timeout=30, allow_redirects=True)
-    assert response.status_code == HTTPStatus.OK
+    assert get_or_skip(full_url, allow_redirects=True).status_code == HTTPStatus.OK
 
 
 @pytest.fixture(scope="module")
 def vtk_volume_mapper_html():
     """Fixture that fetches HTML for vtkVolumeMapper once per test module."""
-    response = requests.get(_vtk_class_url("vtkVolumeMapper"), timeout=30)
-    response.raise_for_status()
-    return response.text
+    return get_or_skip(_vtk_class_url("vtkVolumeMapper")).text
 
 
 def test_find_enumerator_anchor(vtk_volume_mapper_html):
@@ -97,8 +100,7 @@ def test_find_enumerator_anchor(vtk_volume_mapper_html):
 
     # Confirm that the final URL with anchor resolves
     full_url = f"{_vtk_class_url('vtkVolumeMapper')}#{anchor}"
-    response = requests.get(full_url, timeout=30, allow_redirects=True)
-    assert response.status_code == HTTPStatus.OK
+    assert get_or_skip(full_url, allow_redirects=True).status_code == HTTPStatus.OK
 
     # The enclosing enum is still reachable through its memtitle header
     assert _find_member_anchor(vtk_volume_mapper_html, "BlendModes") == BLEND_MODES_ANCHOR
@@ -113,9 +115,7 @@ def test_find_enumerator_anchor(vtk_volume_mapper_html):
 @pytest.fixture(scope="module")
 def vtk_selection_node_html():
     """Fixture that fetches HTML for vtkSelectionNode once per test module."""
-    response = requests.get(_vtk_class_url("vtkSelectionNode"), timeout=30)
-    response.raise_for_status()
-    return response.text
+    return get_or_skip(_vtk_class_url("vtkSelectionNode")).text
 
 
 def test_exact_member_name_is_preferred(vtk_volume_mapper_html, vtk_selection_node_html):
@@ -200,6 +200,8 @@ def _build_docs(src, build_dir, jobs=None):
 
     ``stdout``/``stderr`` on the returned process are already decoded text
     (with invalid bytes replaced), so callers don't need to decode manually.
+
+    Skips the running test when the build reports it could not reach vtk.org.
     """
     cmd = [
         sys.executable,
@@ -212,7 +214,10 @@ def _build_docs(src, build_dir, jobs=None):
     if jobs is not None:
         cmd += ["-d", str(build_dir / "doctrees"), f"-j{jobs}"]
     cmd += ["-W", "--keep-going"]
-    return run(cmd, capture_output=True, encoding="utf-8", errors="replace", check=False)
+    result = run(cmd, capture_output=True, encoding="utf-8", errors="replace", check=False)
+    if UNREACHABLE_MESSAGE in result.stdout:
+        skip_if_unreachable("the build could not check its references")
+    return result
 
 
 def make_temp_doc_project(tmp_path, sample_text: str, conf_extras: str = "", filetype: str = "rst"):
@@ -565,6 +570,28 @@ def test_ignored_status_code_with_member(tmp_path):
     assert VTKRole.resolved_urls[("vtkImageData", None)] == class_url
 
 
+def test_unreachable_server_is_not_an_invalid_reference(tmp_path):
+    """A server which is never reached says nothing about the reference.
+
+    The failure carries no status code, so it used to fall through to the
+    invalid-reference branch and cache the class as invalid for the whole build.
+    """
+    VTKRole.resolved_urls.clear()
+
+    code_block = ":vtk:`vtkImageData`\n\n:vtk:`vtkImageData`\n"
+    doc_project = make_temp_doc_project(tmp_path, code_block)
+    build_dir = tmp_path / "_build"
+
+    refused = requests.ConnectionError("Connection refused")
+    warnings = StringIO()
+    with patch("sphinx_vtk_xref._SESSION.head", side_effect=refused) as mock_head:
+        _build_in_process(doc_project, build_dir, warning=warnings)
+
+    assert "Invalid VTK class reference" not in warnings.getvalue()
+    assert mock_head.call_count == 1
+    assert VTKRole.resolved_urls[("vtkImageData", None)] == _vtk_class_url("vtkImageData")
+
+
 def test_ignored_status_codes_defaults_without_config_value():
     """Falls back to the built-in ignored-codes set if the config value is missing.
 
@@ -577,16 +604,38 @@ def test_ignored_status_codes_defaults_without_config_value():
         assert role._ignored_status_codes() == DEFAULT_IGNORED_STATUS_CODES
 
 
-def test_nitpicky_defaults_true_without_config_value():
-    """Falls back to ``nitpicky=True`` if the config value is missing.
-
-    The config value is always registered by ``setup()`` in real builds; this
-    guards the defensive fallback for callers that access the role directly.
-    """
+def test_nitpicky_defaults_false_without_config_value():
+    """Falls back to ``nitpicky=False`` if the config value is missing."""
     role = VTKRole.__new__(VTKRole)
     fake_env = SimpleNamespace(config=SimpleNamespace())
     with patch.object(VTKRole, "env", fake_env):
-        assert role._nitpicky() is True
+        assert role._nitpicky() is False
+
+
+def test_nitpicky_is_off_without_an_environment():
+    """A document with no Sphinx environment must not be link checked.
+
+    ``sphinx.ext.autosummary`` parses the summary line of a docstring in a bare
+    docutils document, so ``self.env`` raises and the config cannot be read.
+    """
+    settings = frontend.get_default_settings(rst.Parser)
+    settings.report_level = 5
+    document = utils.new_document("", settings)
+    assert not hasattr(settings, "env")
+
+    role = VTKRole()
+    rst.roles.register_local_role("vtk", role)
+    with (
+        patch("sphinx_vtk_xref._SESSION.get") as mock_get,
+        patch("sphinx_vtk_xref._SESSION.head") as mock_head,
+    ):
+        rst.Parser().parse("Apply a :vtk:`vtkThreshold` filter.", document)
+
+    mock_get.assert_not_called()
+    mock_head.assert_not_called()
+    assert role._nitpicky() is False
+    reference = next(iter(document.findall(nodes.reference)))
+    assert reference["refuri"] == _vtk_class_url("vtkThreshold")
 
 
 def _check_html_content(html_path, expected_links):

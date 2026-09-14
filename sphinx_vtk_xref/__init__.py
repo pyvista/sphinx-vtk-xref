@@ -114,10 +114,14 @@ class VTKRole(ReferenceRole):
                 raise requests.RequestException(msg)
             html = response.text if member_path else ""
         except requests.RequestException as exc:
-            if status_code is not None and status_code in self._ignored_status_codes():
+            unreachable = status_code is None
+            if unreachable or status_code in self._ignored_status_codes():
                 # Transient server issue — do not fail the build. Emit an info
                 # message and fall back to the (unvalidated) class URL.
-                self._info_ignored_class_ref(cls_name, status_code, status_reason)
+                if unreachable:
+                    self._info_unreachable_class_ref(cls_name, exc)
+                else:
+                    self._info_ignored_class_ref(cls_name, status_code, status_reason)
                 self.resolved_urls[cache_key] = cls_url
                 if member_name:
                     self.resolved_urls[(cls_name, None)] = cls_url
@@ -170,7 +174,8 @@ class VTKRole(ReferenceRole):
         try:
             return bool(self.env.config.vtk_xref_nitpicky)
         except AttributeError:
-            return True
+            # Link checking is opt-in, and the config is unreadable outside a build
+            return False
 
     def _warn_invalid_class_ref(self, cls_name, reason=None):
         suffix = f" ({reason})" if reason else ""
@@ -191,6 +196,16 @@ class VTKRole(ReferenceRole):
         self._issue_warning(
             f"Too many nested members in VTK reference: '{cls_name}.{full}'. "
             f"Interpreting as '{cls_name}.{resolved}', ignoring: '{extra}'"
+        )
+
+    def _info_unreachable_class_ref(self, cls_name, exc):
+        """Report a reference which could not be checked at all."""
+        reason = str(exc) if str(exc) else exc.__class__.__name__
+        logger.info(
+            f"Could not reach the VTK documentation to check '{cls_name}' → "
+            f"{_vtk_class_url(cls_name)} ({reason}), the class URL is used unvalidated",
+            location=self.get_location(),
+            type="sphinx-vtk-xref",
         )
 
     def _info_ignored_class_ref(self, cls_name, status_code, reason):
