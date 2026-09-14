@@ -8,6 +8,8 @@ from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import Mock
 from unittest.mock import patch
+import json
+import os
 import re
 import sys
 import textwrap
@@ -22,12 +24,16 @@ from sphinx.application import Sphinx
 import pytest
 import requests
 
+import conftest
 from conftest import UNREACHABLE_MESSAGE
 from conftest import get_or_skip
 from conftest import skip_if_unreachable
+from sphinx_vtk_xref import URLS_ENV_VAR
 from sphinx_vtk_xref import DEFAULT_IGNORED_STATUS_CODES
 from sphinx_vtk_xref import VTKRole
+from sphinx_vtk_xref import _append_url
 from sphinx_vtk_xref import _find_member_anchor
+from sphinx_vtk_xref import _read_urls
 from sphinx_vtk_xref import _split_reference
 from sphinx_vtk_xref import _vtk_class_url
 
@@ -181,6 +187,104 @@ def test_reference_spellings(tmp_path):
     assert link["href"] == COMPOSITE_BLEND_URL
 
 
+def _run_sphinx(src, build_dir, env):
+    """Run ``sphinx-build`` in a subprocess with the given environment."""
+    return run(
+        [
+            sys.executable,
+            "-msphinx",
+            "-b",
+            "html",
+            str(src),
+            str(build_dir / "html"),
+            "-W",
+            "--keep-going",
+        ],
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        env=env,
+    )
+
+
+def _build_offline(src, build_dir, urls):
+    """Run ``sphinx-build`` with the server unreachable and the given recorded URLs."""
+    env = {**os.environ, URLS_ENV_VAR: str(urls), "HTTPS_PROXY": "http://127.0.0.1:9"}
+    return _run_sphinx(src, build_dir, env)
+
+
+def test_recorded_urls_are_reused_by_a_later_build(tmp_path):
+    """A build takes its anchors from the recorded URLs instead of asking the server."""
+    urls = tmp_path / "urls.jsonl"
+    urls.write_text(
+        json.dumps(["vtkImageData", "SetOrigin", SET_ORIGIN_URL, True]) + "\n", encoding="utf-8"
+    )
+
+    src = make_temp_doc_project(tmp_path, ":vtk:`vtkImageData.SetOrigin`")
+    build_dir = tmp_path / "_build"
+    result = _build_offline(src, build_dir, urls)
+    assert result.returncode == 0, f"Unexpected failure in Sphinx build:\n{result.stderr}"
+
+    html = (build_dir / "html" / "index.html").read_text(encoding="utf-8")
+    link = BeautifulSoup(html, "html.parser").find("a", href=SET_ORIGIN_URL)
+    assert link is not None, "The anchor was not taken from the recorded URLs"
+
+
+def test_unchecked_references_are_recorded_too(tmp_path):
+    """With link checking off, every reference still lands in the recorded URLs."""
+    urls = tmp_path / "urls.jsonl"
+    code_block = textwrap.dedent("""
+    :vtk:`vtkImageData.SetOrigin`
+    :vtk:`vtkPolyData`
+    """)
+    src = make_temp_doc_project(tmp_path, code_block, conf_extras="vtk_xref_nitpicky = False\n")
+
+    result = _build_offline(src, tmp_path / "_build", urls)
+    assert result.returncode == 0, f"Unexpected failure in Sphinx build:\n{result.stderr}"
+
+    recorded = [json.loads(line) for line in urls.read_text(encoding="utf-8").splitlines()]
+    assert ["vtkImageData", "SetOrigin", _vtk_class_url("vtkImageData"), False] in recorded
+    assert ["vtkPolyData", None, _vtk_class_url("vtkPolyData"), False] in recorded
+
+    # Nothing unvalidated is ever reused as an anchor
+    assert _read_urls(urls) == {}
+
+
+def test_recorded_urls_go_where_the_config_says(tmp_path):
+    """``vtk_xref_urls`` names a file relative to the build output."""
+    conf_extras = "vtk_xref_nitpicky = False\nvtk_xref_urls = 'vtk_xref_urls.jsonl'\n"
+    src = make_temp_doc_project(tmp_path, ":vtk:`vtkPolyData`", conf_extras=conf_extras)
+    build_dir = tmp_path / "_build"
+
+    env = {key: value for key, value in os.environ.items() if key != URLS_ENV_VAR}
+    result = _run_sphinx(src, build_dir, env)
+    assert result.returncode == 0, f"Unexpected failure in Sphinx build:\n{result.stderr}"
+
+    urls = build_dir / "html" / "vtk_xref_urls.jsonl"
+    recorded = [json.loads(line) for line in urls.read_text(encoding="utf-8").splitlines()]
+    assert recorded == [["vtkPolyData", None, _vtk_class_url("vtkPolyData"), False]]
+
+
+def test_recorded_urls_survive_a_damaged_file(tmp_path):
+    """A line which is not a reference is ignored rather than failing the build."""
+    urls = tmp_path / "urls.jsonl"
+    urls.write_text(
+        "not json\n{}\n" + json.dumps(["vtkImageData", None, GET_SPACING_URL, True]) + "\n",
+        encoding="utf-8",
+    )
+    assert _read_urls(urls) == {("vtkImageData", None): GET_SPACING_URL}
+
+
+def test_recorded_urls_survive_an_unusable_path(tmp_path):
+    """A file which cannot be read or written is no reason to fail the build."""
+    assert _read_urls(tmp_path / "never-written.jsonl") == {}
+
+    blocked = tmp_path / "a-file"
+    blocked.write_text("", encoding="utf-8")
+    _append_url(blocked / "urls.jsonl", ("vtkImageData", None), GET_SPACING_URL, validated=True)
+
+
 def _rst_to_myst_role(code_block: str) -> str:
     """Translate ``:vtk:`content``` occurrences to MyST's ``{vtk}`content``` syntax.
 
@@ -214,7 +318,10 @@ def _build_docs(src, build_dir, jobs=None):
     if jobs is not None:
         cmd += ["-d", str(build_dir / "doctrees"), f"-j{jobs}"]
     cmd += ["-W", "--keep-going"]
-    result = run(cmd, capture_output=True, encoding="utf-8", errors="replace", check=False)
+    env = dict(os.environ)
+    if conftest.recorded_urls is not None:
+        env[URLS_ENV_VAR] = str(conftest.recorded_urls)
+    result = run(cmd, capture_output=True, encoding="utf-8", errors="replace", check=False, env=env)
     if UNREACHABLE_MESSAGE in result.stdout:
         skip_if_unreachable("the build could not check its references")
     return result

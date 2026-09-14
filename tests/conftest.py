@@ -27,7 +27,19 @@ UNREACHABLE_MESSAGE = "Could not reach the VTK documentation"
 #: Reasons tests were skipped because vtk.org was unavailable.
 _outages: list[str] = []
 
+#: File the sphinx-build subprocesses record their resolved URLs in.
+recorded_urls: Path | None = None
+
 _config: pytest.Config | None = None
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _recorded_urls(tmp_path_factory: pytest.TempPathFactory):
+    """Point every sphinx-build subprocess at one file of recorded URLs."""
+    global recorded_urls  # noqa: PLW0603
+    recorded_urls = tmp_path_factory.mktemp("vtk_xref") / "urls.jsonl"
+    yield
+    recorded_urls = None
 
 
 def pytest_configure(config: pytest.Config) -> None:

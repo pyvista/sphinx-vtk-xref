@@ -130,6 +130,38 @@ The following options can be set in ``conf.py``:
 
       vtk_xref_ignored_status_codes = {404}
 
+``vtk_xref_urls``
+  Path, default ``None``. Records every URL the ``:vtk:`` role emitted, one
+  JSON line of ``[class, member, url, validated]`` per reference. A relative
+  path is taken from the output directory, so the file is built alongside the
+  HTML and can be published with it.
+
+  .. code-block:: python
+
+      vtk_xref_urls = 'vtk_xref_urls.jsonl'
+
+  The file serves two purposes. Within a build it is a cache: a URL recorded
+  with ``validated`` true is reused rather than fetched again, so a class page
+  is fetched once no matter how many processes a parallel build uses, and
+  pointing a later build at the same file reuses the earlier one's lookups.
+  Across builds it is a manifest of everything the documentation links into
+  VTK, including the references ``vtk_xref_nitpicky = False`` never checked.
+  A project which turns link checking off to keep its docs build independent
+  of vtk.org can publish the file and check the URLs separately, for example
+  with `lychee <https://lychee.cli.rs>`_ on a schedule.
+
+Environment variables
+---------------------
+
+``SPHINX_VTK_XREF_URLS``
+  Path to record the URLs in, overriding ``vtk_xref_urls`` and taken as given
+  rather than from the output directory. Use it to share one file between
+  builds without editing ``conf.py``.
+
+  .. code-block:: bash
+
+      SPHINX_VTK_XREF_URLS=.vtk-xref-urls.jsonl sphinx-build -j auto doc doc/_build
+
 Notes
 -----
 
