@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from http import HTTPStatus
+from pathlib import Path
 from typing import TYPE_CHECKING
+import json
+import os
 import re
 
 from bs4 import BeautifulSoup
@@ -17,8 +20,16 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from typing import ClassVar
 
-#: Timeout (in seconds) for HTTP requests to the VTK documentation server.
-HTTP_TIMEOUT = 30
+#: Seconds to wait for the VTK documentation server to connect, and then for each
+#: read from it. A server which answers within neither is treated as unreachable,
+#: and the reference is left unvalidated.
+HTTP_TIMEOUT = (5, 10)
+
+#: Names the file every reference is recorded in, overriding ``vtk_xref_urls``.
+URLS_ENV_VAR = "SPHINX_VTK_XREF_URLS"
+
+#: Where the running build writes, which a relative ``vtk_xref_urls`` is taken from.
+_outdir: Path | None = None
 
 #: Shared across every lookup, so the connection to the server is reused.
 _SESSION = requests.Session()
@@ -54,9 +65,17 @@ class VTKRole(ReferenceRole):
     # Cache for (class, member) keys with urls as values
     resolved_urls: ClassVar[dict[tuple[str, str | None], str]] = {}
 
+    #: Whether the recorded URLs have been merged into this process.
+    urls_loaded: ClassVar[bool] = False
+
+    #: References this process has already recorded.
+    recorded: ClassVar[set[tuple[str, str | None]]] = set()
+
     def run(self):  # numpydoc ignore=RT01
         """Run the :vtk: role."""
         INVALID_URL = ""  # URL is set to empty string if not valid
+
+        self._load_urls()
 
         cls_full = self.target
         title = self.title
@@ -72,13 +91,13 @@ class VTKRole(ReferenceRole):
         member_name = ".".join(member_path) if member_path else None
         cls_url = _vtk_class_url(cls_name)
 
+        cache_key = (cls_name, member_name)
+
         if not self._nitpicky():
             # Link checking disabled: skip the HTTP validation/anchor lookup
             # entirely and point straight at the (unvalidated) class URL.
-            node = nodes.reference(title, title, refuri=cls_url)
-            return [node], []
+            return self._reference(title, cls_url, cache_key, validated=False)
 
-        cache_key = (cls_name, member_name)
         cached_url = self.resolved_urls.get(cache_key)
         if cached_url is not None:
             # Cache hit, check if valid or not
@@ -92,13 +111,10 @@ class VTKRole(ReferenceRole):
                     self._warn_invalid_class_ref(cls_name)
 
                 # Use class URL fallback for invalid member anchor
-                refuri = cls_url
-            else:
-                # Cached url is valid
-                refuri = cached_url
+                return self._reference(title, cls_url, cache_key, validated=False)
 
-            node = nodes.reference(title, title, refuri=refuri)
-            return [node], []
+            # Cached url is valid
+            return self._reference(title, cached_url, cache_key, validated=True)
 
         # Not cached, build URL and validate
         status_code: int | None = None
@@ -125,8 +141,7 @@ class VTKRole(ReferenceRole):
                 self.resolved_urls[cache_key] = cls_url
                 if member_name:
                     self.resolved_urls[(cls_name, None)] = cls_url
-                node = nodes.reference(title, title, refuri=cls_url)
-                return [node], []
+                return self._reference(title, cls_url, cache_key, validated=False)
 
             # Invalid class url
             reason = str(exc) if str(exc) else exc.__class__.__name__
@@ -138,8 +153,7 @@ class VTKRole(ReferenceRole):
                 self.resolved_urls[(cls_name, None)] = INVALID_URL
 
             # We return the reference even though the URL is bad
-            node = nodes.reference(title, title, refuri=cls_url)
-            return [node], []
+            return self._reference(title, cls_url, cache_key, validated=False)
 
         if member_path:
             anchor, ignored = _find_member_path_anchor(html, member_path)
@@ -148,20 +162,52 @@ class VTKRole(ReferenceRole):
                     self._warn_nested_members_ref(cls_name, member_path, ignored)
                 full_url = f"{cls_url}#{anchor}"
                 self.resolved_urls[cache_key] = full_url
-                node = nodes.reference(title, title, refuri=full_url)
-                return [node], []
+                # A reference which warns must warn again, so never reuse it as an anchor
+                return self._reference(title, full_url, cache_key, validated=not ignored)
             else:
                 # Anchor not found, mark cache as invalid but still fallback to class URL
                 self.resolved_urls[cache_key] = INVALID_URL
                 self._warn_invalid_class_member_ref(cls_name, member_name)
-
-                node = nodes.reference(title, title, refuri=cls_url)
-                return [node], []
+                return self._reference(title, cls_url, cache_key, validated=False)
 
         # No member, just class URL
         self.resolved_urls[cache_key] = cls_url
-        node = nodes.reference(title, title, refuri=cls_url)
-        return [node], []
+        return self._reference(title, cls_url, cache_key, validated=True)
+
+    def _reference(self, title, refuri, key, *, validated):  # numpydoc ignore=RT01
+        """Return the reference node for one target, recording where it points."""
+        self._record_url(key, refuri, validated=validated)
+        return [nodes.reference(title, title, refuri=refuri)], []
+
+    def _urls_path(self):  # numpydoc ignore=RT01
+        """Return the file references are recorded in, or ``None`` if there is none."""
+        override = os.environ.get(URLS_ENV_VAR)
+        if override:
+            return Path(override)
+        try:
+            configured = self.env.config.vtk_xref_urls
+        except AttributeError:
+            return None
+        return _outdir / configured if configured and _outdir else None
+
+    def _load_urls(self):
+        """Merge the URLs other processes validated into this process's cache."""
+        if VTKRole.urls_loaded:
+            return
+        VTKRole.urls_loaded = True
+        path = self._urls_path()
+        if path is not None:
+            for key, url in _read_urls(path).items():
+                VTKRole.resolved_urls.setdefault(key, url)
+
+    def _record_url(self, key, url, *, validated):
+        """Append one reference to the recorded URLs, once per process."""
+        if key in VTKRole.recorded:
+            return
+        path = self._urls_path()
+        if path is not None:
+            VTKRole.recorded.add(key)
+            _append_url(path, key, url, validated=validated)
 
     def _ignored_status_codes(self):
         try:
@@ -222,6 +268,41 @@ class VTKRole(ReferenceRole):
             location=self.get_location(),
             type="sphinx-vtk-xref",
         )
+
+
+def _read_urls(path):  # numpydoc ignore=RT01
+    """Return the validated URLs a recorded-URL file holds."""
+    urls: dict[tuple[str, str | None], str] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return urls
+    for line in lines:
+        try:
+            cls_name, member, url, validated = json.loads(line)
+        except ValueError:
+            continue
+        if validated:
+            urls[cls_name, member] = url
+    return urls
+
+
+def _append_url(path, key, url, *, validated):
+    """Add one reference to the end of a recorded-URL file."""
+    cls_name, member = key
+    line = json.dumps([cls_name, member, url, validated])
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as file:
+            file.write(f"{line}\n")
+    except OSError:
+        return
+
+
+def _remember_outdir(app):
+    """Note where the build writes, so a relative ``vtk_xref_urls`` can be placed there."""
+    global _outdir  # noqa: PLW0603
+    _outdir = Path(app.outdir)
 
 
 def _vtk_class_url(cls_name):
@@ -296,6 +377,7 @@ def _find_enumerator_anchor(soup: BeautifulSoup, member_name: str) -> str | None
 
 def setup(app):
     app.add_role("vtk", VTKRole())
+    app.connect("builder-inited", _remember_outdir)
     app.add_config_value(
         "vtk_xref_ignored_status_codes",
         DEFAULT_IGNORED_STATUS_CODES,
@@ -307,6 +389,12 @@ def setup(app):
         True,
         "env",
         types=(bool,),
+    )
+    app.add_config_value(
+        "vtk_xref_urls",
+        None,
+        "env",
+        types=(str, type(None)),
     )
     return {
         "parallel_read_safe": True,
