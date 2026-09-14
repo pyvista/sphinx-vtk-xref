@@ -4,6 +4,7 @@ from __future__ import annotations
 from subprocess import run
 from pathlib import Path
 from http import HTTPStatus
+from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import Mock
 from unittest.mock import patch
@@ -567,6 +568,28 @@ def test_ignored_status_code_with_member(tmp_path):
     class_url = _vtk_class_url("vtkImageData")
     assert VTKRole.resolved_urls[("vtkImageData", "GetSpacing")] == class_url
     assert VTKRole.resolved_urls[("vtkImageData", None)] == class_url
+
+
+def test_unreachable_server_is_not_an_invalid_reference(tmp_path):
+    """A server which is never reached says nothing about the reference.
+
+    The failure carries no status code, so it used to fall through to the
+    invalid-reference branch and cache the class as invalid for the whole build.
+    """
+    VTKRole.resolved_urls.clear()
+
+    code_block = ":vtk:`vtkImageData`\n\n:vtk:`vtkImageData`\n"
+    doc_project = make_temp_doc_project(tmp_path, code_block)
+    build_dir = tmp_path / "_build"
+
+    refused = requests.ConnectionError("Connection refused")
+    warnings = StringIO()
+    with patch("sphinx_vtk_xref._SESSION.head", side_effect=refused) as mock_head:
+        _build_in_process(doc_project, build_dir, warning=warnings)
+
+    assert "Invalid VTK class reference" not in warnings.getvalue()
+    assert mock_head.call_count == 1
+    assert VTKRole.resolved_urls[("vtkImageData", None)] == _vtk_class_url("vtkImageData")
 
 
 def test_ignored_status_codes_defaults_without_config_value():
