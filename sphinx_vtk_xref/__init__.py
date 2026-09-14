@@ -20,8 +20,10 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from typing import ClassVar
 
-#: Timeout (in seconds) for HTTP requests to the VTK documentation server.
-HTTP_TIMEOUT = 30
+#: Seconds to wait for the VTK documentation server to connect, and then for each
+#: read from it. A server which answers within neither is treated as unreachable,
+#: and the reference is left unvalidated.
+HTTP_TIMEOUT = (5, 10)
 
 #: Names the file every reference is recorded in, overriding ``vtk_xref_urls``.
 URLS_ENV_VAR = "SPHINX_VTK_XREF_URLS"
