@@ -28,6 +28,9 @@ HTTP_TIMEOUT = (5, 10)
 #: Names the file every reference is recorded in, overriding ``vtk_xref_urls``.
 URLS_ENV_VAR = "SPHINX_VTK_XREF_URLS"
 
+#: Where the running build writes, which a relative ``vtk_xref_urls`` is taken from.
+_outdir: Path | None = None
+
 #: Shared across every lookup, so the connection to the server is reused.
 _SESSION = requests.Session()
 
@@ -159,7 +162,8 @@ class VTKRole(ReferenceRole):
                     self._warn_nested_members_ref(cls_name, member_path, ignored)
                 full_url = f"{cls_url}#{anchor}"
                 self.resolved_urls[cache_key] = full_url
-                return self._reference(title, full_url, cache_key, validated=True)
+                # A reference which warns must warn again, so never reuse it as an anchor
+                return self._reference(title, full_url, cache_key, validated=not ignored)
             else:
                 # Anchor not found, mark cache as invalid but still fallback to class URL
                 self.resolved_urls[cache_key] = INVALID_URL
@@ -182,10 +186,9 @@ class VTKRole(ReferenceRole):
             return Path(override)
         try:
             configured = self.env.config.vtk_xref_urls
-            outdir = self.env.app.outdir
         except AttributeError:
             return None
-        return Path(outdir) / configured if configured else None
+        return _outdir / configured if configured and _outdir else None
 
     def _load_urls(self):
         """Merge the URLs other processes validated into this process's cache."""
@@ -296,6 +299,12 @@ def _append_url(path, key, url, *, validated):
         return
 
 
+def _remember_outdir(app):
+    """Note where the build writes, so a relative ``vtk_xref_urls`` can be placed there."""
+    global _outdir  # noqa: PLW0603
+    _outdir = Path(app.outdir)
+
+
 def _vtk_class_url(cls_name):
     """Return the URL to the documentation for a VTK class."""
     return f"https://vtk.org/doc/nightly/html/class{cls_name}.html"
@@ -368,6 +377,7 @@ def _find_enumerator_anchor(soup: BeautifulSoup, member_name: str) -> str | None
 
 def setup(app):
     app.add_role("vtk", VTKRole())
+    app.connect("builder-inited", _remember_outdir)
     app.add_config_value(
         "vtk_xref_ignored_status_codes",
         DEFAULT_IGNORED_STATUS_CODES,
