@@ -103,7 +103,8 @@ Usage
 - Python references to VTK classes also link to the class documentation,
   whatever module path they use. This covers type annotations such as
   ``-> vtkmodules.vtkCommonCore.vtkPoints`` in autodoc signatures, and
-  docstring types such as ``points : vtkPoints``. These links are not checked.
+  docstring types such as ``points : vtkPoints``. They are checked the same
+  way as ``:vtk:`` class references.
 
 Configuration
 -------------

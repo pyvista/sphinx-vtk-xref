@@ -592,6 +592,24 @@ def test_unreachable_server_is_not_an_invalid_reference(tmp_path):
     assert VTKRole.resolved_urls[("vtkImageData", None)] == _vtk_class_url("vtkImageData")
 
 
+def test_unreachable_server_with_member_is_not_an_invalid_reference(tmp_path):
+    """A member reference to an unreachable server falls back to the class URL."""
+    VTKRole.resolved_urls.clear()
+
+    code_block = ":vtk:`vtkImageData.GetSpacing`\n"
+    doc_project = make_temp_doc_project(tmp_path, code_block)
+    build_dir = tmp_path / "_build"
+
+    refused = requests.ConnectionError("Connection refused")
+    warnings = StringIO()
+    with patch("sphinx_vtk_xref._SESSION.get", side_effect=refused):
+        _build_in_process(doc_project, build_dir, warning=warnings)
+
+    assert "Invalid VTK class reference" not in warnings.getvalue()
+    class_url = _vtk_class_url("vtkImageData")
+    assert VTKRole.resolved_urls[("vtkImageData", "GetSpacing")] == class_url
+
+
 def test_ignored_status_codes_defaults_without_config_value():
     """Falls back to the built-in ignored-codes set if the config value is missing.
 
