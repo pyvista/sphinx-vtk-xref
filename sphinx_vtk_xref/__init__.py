@@ -31,6 +31,12 @@ MEMTITLE_NAME_PATTERN = re.compile(r"[\s◆]*([^\s(]+)")
 #: of ``GetSpacing(double x)``.
 ARGUMENT_LIST_PATTERN = re.compile(r"\(.*\)\s*$")
 
+#: A VTK class name, i.e. the ``vtkPoints`` of ``vtkmodules.vtkCommonCore.vtkPoints``.
+VTK_CLASS_PATTERN = re.compile(r"vtk[A-Z]\w*")
+
+#: Cached in place of a URL for a reference that is not valid.
+_INVALID_URL = ""
+
 #: HTTP status codes that, by default, do not fail the build. These typically
 #: indicate a transient server-side issue (rate limiting or upstream
 #: unavailability) rather than a genuinely-invalid class reference.
@@ -78,6 +84,11 @@ class VTKRole(ReferenceRole):
             node = nodes.reference(title, title, refuri=cls_url)
             return [node], []
 
+        if not member_path:
+            _check_class(cls_name, self.env.config, self.get_location())
+            node = nodes.reference(title, title, refuri=cls_url)
+            return [node], []
+
         cache_key = (cls_name, member_name)
         cached_url = self.resolved_urls.get(cache_key)
         if cached_url is not None:
@@ -104,15 +115,13 @@ class VTKRole(ReferenceRole):
         status_code: int | None = None
         status_reason = ""
         try:
-            # Only an anchor lookup needs the page body; otherwise the status is enough.
-            fetch = _SESSION.get if member_path else _SESSION.head
-            response = fetch(cls_url, timeout=HTTP_TIMEOUT)
+            response = _SESSION.get(cls_url, timeout=HTTP_TIMEOUT)
             status_code = response.status_code
             status_reason = response.reason or ""
             if status_code != HTTPStatus.OK:
                 msg = f"HTTP {status_code} {status_reason}".strip()
                 raise requests.RequestException(msg)
-            html = response.text if member_path else ""
+            html = response.text
         except requests.RequestException as exc:
             unreachable = status_code is None
             if unreachable or status_code in self._ignored_status_codes():
@@ -141,27 +150,21 @@ class VTKRole(ReferenceRole):
             node = nodes.reference(title, title, refuri=cls_url)
             return [node], []
 
-        if member_path:
-            anchor, ignored = _find_member_path_anchor(html, member_path)
-            if anchor:
-                if ignored:
-                    self._warn_nested_members_ref(cls_name, member_path, ignored)
-                full_url = f"{cls_url}#{anchor}"
-                self.resolved_urls[cache_key] = full_url
-                node = nodes.reference(title, title, refuri=full_url)
-                return [node], []
-            else:
-                # Anchor not found, mark cache as invalid but still fallback to class URL
-                self.resolved_urls[cache_key] = INVALID_URL
-                self._warn_invalid_class_member_ref(cls_name, member_name)
+        anchor, ignored = _find_member_path_anchor(html, member_path)
+        if anchor:
+            if ignored:
+                self._warn_nested_members_ref(cls_name, member_path, ignored)
+            full_url = f"{cls_url}#{anchor}"
+            self.resolved_urls[cache_key] = full_url
+            node = nodes.reference(title, title, refuri=full_url)
+            return [node], []
+        else:
+            # Anchor not found, mark cache as invalid but still fallback to class URL
+            self.resolved_urls[cache_key] = INVALID_URL
+            self._warn_invalid_class_member_ref(cls_name, member_name)
 
-                node = nodes.reference(title, title, refuri=cls_url)
-                return [node], []
-
-        # No member, just class URL
-        self.resolved_urls[cache_key] = cls_url
-        node = nodes.reference(title, title, refuri=cls_url)
-        return [node], []
+            node = nodes.reference(title, title, refuri=cls_url)
+            return [node], []
 
     def _ignored_status_codes(self):
         try:
@@ -178,10 +181,7 @@ class VTKRole(ReferenceRole):
             return False
 
     def _warn_invalid_class_ref(self, cls_name, reason=None):
-        suffix = f" ({reason})" if reason else ""
-        self._issue_warning(
-            f"Invalid VTK class reference: '{cls_name}' → {_vtk_class_url(cls_name)}{suffix}"
-        )
+        _warn_invalid_class(cls_name, self.get_location(), reason)
 
     def _warn_invalid_class_member_ref(self, cls_name, member_name):
         self._issue_warning(
@@ -200,21 +200,10 @@ class VTKRole(ReferenceRole):
 
     def _info_unreachable_class_ref(self, cls_name, exc):
         """Report a reference which could not be checked at all."""
-        reason = str(exc) if str(exc) else exc.__class__.__name__
-        logger.info(
-            f"Could not reach the VTK documentation to check '{cls_name}' → "
-            f"{_vtk_class_url(cls_name)} ({reason}), the class URL is used unvalidated",
-            location=self.get_location(),
-            type="sphinx-vtk-xref",
-        )
+        _info_unreachable_class(cls_name, self.get_location(), exc)
 
     def _info_ignored_class_ref(self, cls_name, status_code, reason):
-        logger.info(
-            f"Ignoring HTTP {status_code} {reason} for VTK class reference: "
-            f"'{cls_name}' → {_vtk_class_url(cls_name)}",
-            location=self.get_location(),
-            type="sphinx-vtk-xref",
-        )
+        _info_ignored_class(cls_name, self.get_location(), status_code, reason)
 
     def _issue_warning(self, msg):
         logger.warning(
@@ -222,6 +211,73 @@ class VTKRole(ReferenceRole):
             location=self.get_location(),
             type="sphinx-vtk-xref",
         )
+
+
+def _check_class(cls_name, config, location):
+    """Check that a VTK class has a documentation page, and report it if not."""
+    cache_key = (cls_name, None)
+    cached_url = VTKRole.resolved_urls.get(cache_key)
+    if cached_url is not None:
+        if cached_url == _INVALID_URL:
+            _warn_invalid_class(cls_name, location)
+        return
+    cls_url = _vtk_class_url(cls_name)
+    status_code: int | None = None
+    status_reason = ""
+    try:
+        response = _SESSION.head(cls_url, timeout=HTTP_TIMEOUT)
+        status_code = response.status_code
+        status_reason = response.reason or ""
+        if status_code != HTTPStatus.OK:
+            msg = f"HTTP {status_code} {status_reason}".strip()
+            raise requests.RequestException(msg)
+    except requests.RequestException as exc:
+        if status_code is None:
+            _info_unreachable_class(cls_name, location, exc)
+        elif status_code in _ignored_status_codes(config):
+            _info_ignored_class(cls_name, location, status_code, status_reason)
+        else:
+            _warn_invalid_class(cls_name, location, str(exc) or exc.__class__.__name__)
+            VTKRole.resolved_urls[cache_key] = _INVALID_URL
+            return
+    VTKRole.resolved_urls[cache_key] = cls_url
+
+
+def _ignored_status_codes(config):
+    """Return the HTTP status codes that do not fail the build."""
+    codes = getattr(config, "vtk_xref_ignored_status_codes", None)
+    return DEFAULT_IGNORED_STATUS_CODES if codes is None else frozenset(codes)
+
+
+def _warn_invalid_class(cls_name, location, reason=None):
+    """Warn about a reference to a VTK class without a documentation page."""
+    suffix = f" ({reason})" if reason else ""
+    logger.warning(
+        f"Invalid VTK class reference: '{cls_name}' → {_vtk_class_url(cls_name)}{suffix}",
+        location=location,
+        type="sphinx-vtk-xref",
+    )
+
+
+def _info_unreachable_class(cls_name, location, exc):
+    """Report a reference which could not be checked at all."""
+    reason = str(exc) if str(exc) else exc.__class__.__name__
+    logger.info(
+        f"Could not reach the VTK documentation to check '{cls_name}' → "
+        f"{_vtk_class_url(cls_name)} ({reason}), the class URL is used unvalidated",
+        location=location,
+        type="sphinx-vtk-xref",
+    )
+
+
+def _info_ignored_class(cls_name, location, status_code, reason):
+    """Report a reference whose check returned a status that does not fail the build."""
+    logger.info(
+        f"Ignoring HTTP {status_code} {reason} for VTK class reference: "
+        f"'{cls_name}' → {_vtk_class_url(cls_name)}",
+        location=location,
+        type="sphinx-vtk-xref",
+    )
 
 
 def _vtk_class_url(cls_name):
@@ -294,8 +350,21 @@ def _find_enumerator_anchor(soup: BeautifulSoup, member_name: str) -> str | None
     return None
 
 
+def resolve_python_reference(app, env, node, contnode):  # numpydoc ignore=RT01
+    """Link an unresolved Python reference to a VTK class to its documentation, and check it."""
+    if node.get("refdomain") != "py":
+        return None
+    cls_name = node["reftarget"].rpartition(".")[2]
+    if not VTK_CLASS_PATTERN.fullmatch(cls_name):
+        return None
+    if env.config.vtk_xref_nitpicky:
+        _check_class(cls_name, env.config, node)
+    return nodes.reference("", "", contnode, internal=False, refuri=_vtk_class_url(cls_name))
+
+
 def setup(app):
     app.add_role("vtk", VTKRole())
+    app.connect("missing-reference", resolve_python_reference)
     app.add_config_value(
         "vtk_xref_ignored_status_codes",
         DEFAULT_IGNORED_STATUS_CODES,
