@@ -31,6 +31,9 @@ MEMTITLE_NAME_PATTERN = re.compile(r"[\s◆]*([^\s(]+)")
 #: of ``GetSpacing(double x)``.
 ARGUMENT_LIST_PATTERN = re.compile(r"\(.*\)\s*$")
 
+#: A VTK class name, i.e. the ``vtkPoints`` of ``vtkmodules.vtkCommonCore.vtkPoints``.
+VTK_CLASS_PATTERN = re.compile(r"vtk[A-Z]\w*")
+
 #: HTTP status codes that, by default, do not fail the build. These typically
 #: indicate a transient server-side issue (rate limiting or upstream
 #: unavailability) rather than a genuinely-invalid class reference.
@@ -294,8 +297,19 @@ def _find_enumerator_anchor(soup: BeautifulSoup, member_name: str) -> str | None
     return None
 
 
+def resolve_python_reference(app, env, node, contnode):  # numpydoc ignore=RT01
+    """Link an unresolved Python reference to a VTK class to its documentation."""
+    if node.get("refdomain") != "py":
+        return None
+    cls_name = node["reftarget"].rpartition(".")[2]
+    if not VTK_CLASS_PATTERN.fullmatch(cls_name):
+        return None
+    return nodes.reference("", "", contnode, internal=False, refuri=_vtk_class_url(cls_name))
+
+
 def setup(app):
     app.add_role("vtk", VTKRole())
+    app.connect("missing-reference", resolve_python_reference)
     app.add_config_value(
         "vtk_xref_ignored_status_codes",
         DEFAULT_IGNORED_STATUS_CODES,
