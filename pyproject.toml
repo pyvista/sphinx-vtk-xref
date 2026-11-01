@@ -21,7 +21,7 @@ dynamic = ['version']
 license = { text = 'MIT' }
 name = 'sphinx-vtk-xref'
 readme = 'README.rst'
-requires-python = '>=3.10'
+requires-python = '>=3.11'
 
 [project.urls]
 Homepage = 'https://github.com/pyvista/sphinx-vtk-xref'
